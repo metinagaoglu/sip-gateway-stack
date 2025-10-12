@@ -1,0 +1,38 @@
+# Temel imaj olarak Debian 11 (bullseye) kullanıyoruz
+FROM arm64v8/debian:bullseye-slim
+
+# Gerekli bağımlılıkları kuruyoruz
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    bison \
+    flex \
+    libpcap-dev \
+    libssl-dev \
+    libcurl4-openssl-dev \
+    libunistring-dev \
+    libxml2-dev \
+    libjson-c-dev \
+    libpcap-dev \
+    liblzma-dev \
+    libsnmp-dev \
+    libsctp-dev \
+    libhiredis-dev \
+    pkg-config \
+    && apt-get clean
+
+# Kamailio kaynak kodunu çekiyoruz
+RUN git clone https://github.com/kamailio/kamailio.git /kamailio
+
+# Kamailio'yu derliyoruz
+WORKDIR /kamailio
+RUN make all && make install
+
+# PostgreSQL ve Redis modüllerini yüklemek için gerekli modülleri ekliyoruz
+RUN make modules && make install-modules
+
+COPY kamailio.cfg /etc/kamailio/kamailio.cfg
+
+# Kamailio'yu başlatmak için gerekli komutları ekliyoruz
+CMD ["kamailio", "-DD", "-E", "-f", "/etc/kamailio/kamailio.cfg"]

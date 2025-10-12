@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: kamailio
+      POSTGRES_PASSWORD: kamailio
+      POSTGRES_DB: kamailio
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - voip_net
+
+  redis:
+    image: redis:7
+    volumes:
+      - redis_data:/data
+    networks:
+      - voip_net
+
+  kamailio:
+    build: ./kamailio
+    environment:
+      DBHOST: postgres
+      DBUSER: kamailio
+      DBPASS: kamailio
+      REDIS_HOST: redis
+    ports:
+      - "5060:5060/udp"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - voip_net
+
+  freeswitch:
+    build: ./freeswitch
+    ports:
+      - "5061:5060/udp"
+      - "8021:8021/tcp"    # fs_cli portu
+      - "16384-16400:16384-16400/udp"  # RTP
+    depends_on:
+      - kamailio
+    networks:
+      - voip_net
+
+volumes:
+  pg_data:
+  redis_data:
+
+networks:
+  voip_net:
+    driver: bridge

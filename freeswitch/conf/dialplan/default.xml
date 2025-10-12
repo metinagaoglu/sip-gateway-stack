@@ -1,0 +1,6 @@
+<extension name="echo-test">
+  <condition field="destination_number" expression="^9999$">
+    <action application="answer"/>
+    <action application="echo"/>
+  </condition>
+</extension>
