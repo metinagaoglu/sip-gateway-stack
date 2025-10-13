@@ -37,12 +37,32 @@ services:
 
   freeswitch:
     build: ./freeswitch
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: kamailio
+      POSTGRES_USER: kamailio
+      POSTGRES_PASSWORD: kamailio
     ports:
       - "5061:5060/udp"
       - "8021:8021/tcp"    # fs_cli portu
       - "16384-16400:16384-16400/udp"  # RTP
     depends_on:
+      - postgres
       - kamailio
+    networks:
+      - voip_net
+
+  pgadmin:
+    image: dpage/pgadmin4:7
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com   # login email
+      PGADMIN_DEFAULT_PASSWORD: admin123          # login password
+    ports:
+      - "8080:80"
+    depends_on:
+      - postgres
     networks:
       - voip_net
 

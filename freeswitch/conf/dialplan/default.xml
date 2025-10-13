@@ -1,6 +1,13 @@
 <extension name="echo-test">
   <condition field="destination_number" expression="^9999$">
     <action application="answer"/>
+    <action application="set" data="hangup_after_bridge=true"/>
     <action application="echo"/>
+  </condition>
+</extension>
+
+<extension name="cdr-insert" continue="false">
+  <condition field="${Event-Name}" expression="^CHANNEL_HANGUP_COMPLETE$">
+    <action application="pgsql" data="kamailio INSERT INTO cdr (uuid, caller_id_name, caller_id_number, destination_number, context, start_stamp, answer_stamp, end_stamp, duration, billsec, hangup_cause) VALUES ('${uuid}', '${caller_id_name}', '${caller_id_number}', '${destination_number}', '${context}', '${start_stamp}', '${answer_stamp}', '${end_stamp}', ${duration}, ${billsec}, '${hangup_cause}')"/>
   </condition>
 </extension>

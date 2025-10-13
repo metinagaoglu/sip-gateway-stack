@@ -1,0 +1,11 @@
+<configuration name="pgsql.conf" description="PGSQL Configuration">
+  <settings>
+    <connection name="kamailio">
+      <param name="hostname" value="postgres"/>
+      <param name="hostport" value="5432"/>
+      <param name="username" value="kamailio"/>
+      <param name="password" value="kamailio"/>
+      <param name="dbname" value="kamailio"/>
+    </connection>
+  </settings>
+</configuration>
