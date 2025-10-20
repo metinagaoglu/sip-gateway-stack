@@ -1,8 +1,155 @@
-# freeswitch/Dockerfile
-FROM safarov/freeswitch
+# ============================================================================
+# AŞAMA 1: DERLEME ORTAMI (Builder)
+# ============================================================================
+FROM debian:bullseye-slim AS builder
 
-# Custom config dosyalarını /usr/share altına kopyala
-# Entrypoint script bunları /etc/freeswitch'e kopyalayacak
-COPY conf/ /usr/share/freeswitch/conf/vanilla/
+ARG FS_VERSION=v1.10
 
-EXPOSE 5060/udp 8021/tcp 16384-16400/udp
+ENV DEBIAN_FRONTEND=noninteractive \
+    PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig
+
+WORKDIR /usr/src
+
+# Adım 1: Temel derleyici araçları ve tüm bağımlılıkları kur
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential cmake pkg-config \
+    git ca-certificates wget curl \
+    autoconf automake libtool libtool-bin yasm \
+    perl tcl nasm \
+    zlib1g-dev libssl-dev libsqlite3-dev libpcre3-dev \
+    libspeexdsp-dev libspeex-dev libedit-dev \
+    libcurl4-openssl-dev libldns-dev libopus-dev \
+    libavformat-dev libswscale-dev libswresample-dev libvpx-dev libavcodec-dev \
+    libsndfile1-dev libopusfile-dev \
+    libjpeg62-turbo-dev libtiff5-dev \
+    libpq-dev libmariadb-dev \
+    libncurses-dev libglib2.0-dev \
+    liblua5.2-dev libperl-dev \
+    uuid-dev xml2 libxml2-dev && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Adım 2: libks (KitSun Signal) - mod_verto ve mod_signalwire için gerekli
+WORKDIR /usr/src/libks
+RUN git clone https://github.com/signalwire/libks.git . && \
+    cmake . && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig
+
+# Adım 3: Sofia-SIP kütüphanesi
+WORKDIR /usr/src/sofia-sip
+RUN git clone https://github.com/freeswitch/sofia-sip.git . && \
+    ./bootstrap.sh -j && \
+    ./configure --prefix=/usr/local && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig
+
+# Adım 4: SPANDSP kütüphanesi (FAX ve ses kodlama)
+WORKDIR /usr/src/spandsp
+RUN git clone https://github.com/freeswitch/spandsp.git . && \
+    git reset --hard 0d2e6ac65e0e8f53d652665a743015a88bf048d4 && \
+    ./bootstrap.sh -j && \
+    ./configure --prefix=/usr/local && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig
+
+# Adım 5: FreeSWITCH kaynak kodunu klonla
+WORKDIR /usr/src/freeswitch
+RUN git clone -b ${FS_VERSION} https://github.com/signalwire/freeswitch.git .
+
+# Adım 6: Bootstrap ve Configure (Modülleri yapılandır)
+RUN \
+    # PostgreSQL modüllerini etkinleştir
+    sed -i 's|#database/mod_pgsql|database/mod_pgsql|' build/modules.conf.in && \
+    sed -i 's|#event_handlers/mod_cdr_pgsql|event_handlers/mod_cdr_pgsql|' build/modules.conf.in && \
+    sed -i 's|#dialplan_tools/mod_dialplan_pgsql|dialplan_tools/mod_dialplan_pgsql|' build/modules.conf.in && \
+    \
+    # mod_verto'yu etkinleştir (libks kurulu olduğu için çalışacak)
+    # mod_signalwire'ı devre dışı bırak (signalwire-client-c kütüphanesi eksik)
+    sed -i 's|^applications/mod_signalwire|#applications/mod_signalwire|' build/modules.conf.in && \
+    \
+    # İstenmeyen modülleri devre dışı bırak
+    sed -i 's|^applications/mod_v8|#applications/mod_v8|' build/modules.conf.in && \
+    sed -i 's|^formats/mod_v8|#formats/mod_v8|' build/modules.conf.in && \
+    sed -i 's|^databases/mod_memcache|#databases/mod_memcache|' build/modules.conf.in && \
+    \
+    # Bootstrap betiğini çalıştır (configure scriptini oluştur)
+    ./bootstrap.sh -j
+
+# Adım 7: Configure komutunu çalıştır
+RUN ./configure --prefix=/opt/freeswitch \
+    --enable-core-pgsql-support \
+    CFLAGS='-Wno-error=deprecated-declarations'
+
+# Adım 8: FreeSWITCH'i derle
+RUN make -j$(nproc)
+
+# Adım 9: FreeSWITCH'i kur ve ses dosyalarını kur
+RUN make install && \
+    make sounds-install && \
+    make moh-install
+
+# ============================================================================
+# AŞAMA 2: SON ÇALIŞTIRMA İMAJI (Runtime)
+# ============================================================================
+FROM debian:bullseye-slim
+
+WORKDIR /opt/freeswitch
+
+# Adım 1: Sadece runtime bağımlılıklarını kur
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl1.1 libsqlite3-0 libpcre3 libspeexdsp1 libspeex1 libedit2 \
+    libcurl4 libldns3 libopus0 liblua5.2-0 \
+    libavformat58 libswscale5 libswresample3 libvpx6 libavcodec58 \
+    libsndfile1 libopusfile0 \
+    libjpeg62-turbo libtiff5 \
+    libpq5 libmariadb3 \
+    libncurses6 libglib2.0-0 \
+    libuuid1 libxml2 \
+    procps psmisc nano curl iputils-ping netcat-openbsd less && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Adım 2: FreeSWITCH kulllanıcısı ve grubu oluştur
+RUN groupadd --gid 1000 freeswitch && \
+    useradd --uid 1000 --gid 1000 --home-dir /opt/freeswitch \
+    --shell /bin/bash --no-create-home freeswitch
+
+# Adım 3: Builder aşamasından derlenmiş dosyaları kopyala
+COPY --from=builder /opt/freeswitch /opt/freeswitch
+COPY --from=builder /usr/local/lib /usr/local/lib
+COPY --from=builder /usr/local/include /usr/local/include
+
+# Adım 4: FreeSWITCH'in kullnadığı dizinleri oluştur
+RUN mkdir -p /opt/freeswitch/log \
+             /opt/freeswitch/db \
+             /opt/freeswitch/recordings \
+             /opt/freeswitch/cache && \
+    chown -R freeswitch:freeswitch /opt/freeswitch
+
+# Adım 5: Sistem kütüphanelerini güncelle
+RUN ldconfig
+
+# Adım 6: Symlink'ler oluştur (opsiyonel)
+RUN ln -sf /opt/freeswitch/bin/freeswitch /usr/bin/freeswitch && \
+    ln -sf /opt/freeswitch/bin/fs_cli /usr/bin/fs_cli
+
+# FreeSWITCH kullanıcısına geç (root değil!)
+USER freeswitch
+
+# Adım 7: Port'ları aç
+EXPOSE 5060/tcp 5060/udp
+EXPOSE 5080/tcp 5080/udp
+EXPOSE 8021/tcp
+EXPOSE 16384-32768/udp
+
+# Adım 8: Sağlık kontrolü
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD fs_cli -x "status" || exit 1
+
+# Adım 9: FreeSWITCH'i başlat
+CMD ["/opt/freeswitch/bin/freeswitch", "-nonat", "-nonatmap", "-nf", "-c"]
