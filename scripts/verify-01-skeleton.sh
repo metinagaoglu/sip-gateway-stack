@@ -17,7 +17,7 @@ grep -q '^version:' docker-compose.yml && fail "compose'da obsolete 'version:' a
 docker compose config >/dev/null 2>&1 || fail "docker compose config gecersiz"
 docker compose config | grep -q 'voip_pg_data' || fail "voip_pg_data volume yok"
 docker compose config | grep -q 'voip_net' || fail "voip_net network yok"
-grep -q '^name: voip' docker-compose.yml || fail "compose proje adi 'voip' degil"
+grep -q '^name: voip$' docker-compose.yml || fail "compose proje adi 'voip' degil"
 
 for f in QUICK_START.md DEPLOYMENT_PGSQL.md POSTGRESQL_INTEGRATION.md \
          API_MANAGEMENT.md KAMAILIO_CDR_SETUP.md \
@@ -26,7 +26,13 @@ for f in QUICK_START.md DEPLOYMENT_PGSQL.md POSTGRESQL_INTEGRATION.md \
   [ -f "$f" ] && fail "$f hala kokte (tasinmali, kopyalanmamali)"
 done
 
-[ -f legacy/docker-compose.pgsql.yml ] || fail "legacy/docker-compose.pgsql.yml yok"
-[ -f legacy/init.sql ]                 || fail "legacy/init.sql yok"
+for f in init.sql docker-compose.pgsql.yml deploy.sh; do
+  [ -f "legacy/$f" ] || fail "legacy/$f yok"
+  [ -f "$f" ] && fail "$f hala kokte (tasinmali, kopyalanmamali)"
+done
+
+[ -f "legacy/modules.conf.pgsql.xml" ] || fail "legacy/modules.conf.pgsql.xml yok"
+[ -f "freeswitch/conf/autoload_configs/modules.conf.pgsql.xml" ] && \
+  fail "freeswitch/conf/autoload_configs/modules.conf.pgsql.xml hala kokte (tasinmali, kopyalanmamali)"
 
 echo "OK: verify-01-skeleton"
