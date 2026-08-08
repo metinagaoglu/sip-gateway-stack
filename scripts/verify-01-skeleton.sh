@@ -16,6 +16,8 @@ grep -q '^version:' docker-compose.yml && fail "compose'da obsolete 'version:' a
 
 docker compose config >/dev/null 2>&1 || fail "docker compose config gecersiz"
 docker compose config | grep -q 'voip_pg_data' || fail "voip_pg_data volume yok"
+docker compose config | grep -q 'voip_net' || fail "voip_net network yok"
+grep -q '^name: voip' docker-compose.yml || fail "compose proje adi 'voip' degil"
 
 for f in QUICK_START.md DEPLOYMENT_PGSQL.md POSTGRESQL_INTEGRATION.md \
          API_MANAGEMENT.md KAMAILIO_CDR_SETUP.md \
