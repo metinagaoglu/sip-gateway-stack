@@ -1,0 +1,22 @@
+<configuration name="cdr_pg_csv.conf" description="PostgreSQL CDR Logger">
+  <settings>
+
+    <!-- Mevcut pgsql bağlantısını kullan -->
+    <param name="db-info" value="${dsn(kamailio)}"/>
+
+    <!-- A ve B bacaklarını da logla -->
+    <param name="legs" value="both"/>
+    <param name="log-b-leg" value="true"/>
+
+    <!-- Cevapsız (billsec=0) çağrıları da kaydet -->
+    <param name="filter-zerobillsec" value="false"/>
+
+    <!-- Her çağrı bittiğinde anında yaz -->
+    <param name="write-cdr-on-exit" value="true"/>
+
+    <!-- CDR tablona göre kolon isimleri eşleştirilecek -->
+    <param name="table" value="cdr"/>
+
+    <!-- İstersen özel SQL de tanımlayabilirsin, ama otomatik insert gayet yeterli -->
+  </settings>
+</configuration>

@@ -64,8 +64,11 @@ RUN git clone -b ${FS_VERSION} https://github.com/signalwire/freeswitch.git .
 RUN \
     # PostgreSQL modüllerini etkinleştir
     sed -i 's|#database/mod_pgsql|database/mod_pgsql|' build/modules.conf.in && \
-    sed -i 's|#event_handlers/mod_cdr_pgsql|event_handlers/mod_cdr_pgsql|' build/modules.conf.in && \
+    sed -i 's|#event_handlers/mod_cdr_pg_csv|event_handlers/mod_cdr_pg_csv|' build/modules.conf.in && \
     sed -i 's|#dialplan_tools/mod_dialplan_pgsql|dialplan_tools/mod_dialplan_pgsql|' build/modules.conf.in && \
+    \
+    # XML Curl modülünü etkinleştir (PostgreSQL directory için gerekli)
+    sed -i 's|#xml_int/mod_xml_curl|xml_int/mod_xml_curl|' build/modules.conf.in && \
     \
     # mod_verto'yu etkinleştir (libks kurulu olduğu için çalışacak)
     # mod_signalwire'ı devre dışı bırak (signalwire-client-c kütüphanesi eksik)
@@ -87,8 +90,9 @@ RUN ./configure --prefix=/opt/freeswitch \
 # Adım 8: FreeSWITCH'i derle
 RUN make -j$(nproc)
 
-# Adım 9: FreeSWITCH'i kur ve ses dosyalarını kur
+# Adım 9: FreeSWITCH'i kur, vanilla config ve ses dosyalarını kur
 RUN make install && \
+    make samples && \
     make sounds-install && \
     make moh-install
 
