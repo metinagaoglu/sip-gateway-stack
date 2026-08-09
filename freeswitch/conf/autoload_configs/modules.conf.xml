@@ -16,6 +16,17 @@
 
     <!-- Endpoints -->
     <load module="mod_sofia"/>
+    <!-- mod_loopback BILEREK YUKLENMIYOR: Task 8 sirasinda ampirik olarak
+         dogrulandi ki bu derlemede (FreeSWITCH 1.10.12) bir loopback
+         baglantisinin cift bacagi (bonded pair) NASIL sonlandirilirsa
+         sonlandirilsin — uuid_kill, sched_hangup, hatta dialplan'in kendi
+         sonundaki normal <action application="hangup"/> ile dogal bitis —
+         FreeSWITCH surecini SEGFAULT (exit code 139) ile cokertiyor.
+         Tekrar tekrar (5+ kez) izole edilerek dogrulandi; bkz.
+         task-8-report.md. Bu modul yuklenmeden gercek SIP trafiginde
+         (Kamailio -> internal profil) hicbir islevsellik kaybi olmaz —
+         sadece 'originate loopback/...' tarzi sunucu-tarafi test
+         orijinasyonlari kullanilamaz. -->
 
     <!-- Applications -->
     <load module="mod_commands"/>

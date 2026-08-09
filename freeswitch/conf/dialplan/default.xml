@@ -1,13 +1,43 @@
-<extension name="echo-test">
-  <condition field="destination_number" expression="^9999$">
-    <action application="answer"/>
-    <action application="set" data="hangup_after_bridge=true"/>
-    <action application="echo"/>
-  </condition>
-</extension>
+<include>
+  <context name="default">
 
-<extension name="cdr-insert" continue="false">
-  <condition field="${Event-Name}" expression="^CHANNEL_HANGUP_COMPLETE$">
-    <action application="pgsql" data="kamailio INSERT INTO cdr (uuid, caller_id_name, caller_id_number, destination_number, context, start_stamp, answer_stamp, end_stamp, duration, billsec, hangup_cause) VALUES ('${uuid}', '${caller_id_name}', '${caller_id_number}', '${destination_number}', '${context}', '${start_stamp}', '${answer_stamp}', '${end_stamp}', ${duration}, ${billsec}, '${hangup_cause}')"/>
-  </condition>
-</extension>
+    <!-- Her cagrida tenant_id garanti altina alinir.
+         Directory'den gelen kullanicilarda xmlapi set eder;
+         gelmeyenlerde (ornegin trunk) burada varsayilan atanir.
+         CDR INSERT'i bu degiskene bagli — bos kalirsa INSERT patlar
+         (bkz. Task 10, mod_cdr_pg_csv). -->
+    <extension name="tenant-default" continue="true">
+      <condition field="${tenant_id}" expression="^$">
+        <action application="set" data="tenant_id=1"/>
+      </condition>
+    </extension>
+
+    <extension name="echo-test">
+      <condition field="destination_number" expression="^9999$">
+        <action application="answer"/>
+        <action application="sleep" data="500"/>
+        <action application="echo"/>
+      </condition>
+    </extension>
+
+    <extension name="tone-test">
+      <condition field="destination_number" expression="^9998$">
+        <action application="answer"/>
+        <action application="playback" data="tone_stream://%(2000,4000,440,480);loops=10"/>
+        <action application="hangup"/>
+      </condition>
+    </extension>
+
+    <!-- Kullanicidan kullaniciya: FreeSWITCH kayitlari bilmedigi icin
+         cagri Kamailio'ya geri gonderilir (profil outbound-proxy'si),
+         Kamailio lookup("location") ile aboneye ulastirir. -->
+    <extension name="local-user">
+      <condition field="destination_number" expression="^(\d{2,7})$">
+        <action application="set" data="call_timeout=30"/>
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="bridge" data="sofia/internal/$1@${domain_name}"/>
+      </condition>
+    </extension>
+
+  </context>
+</include>

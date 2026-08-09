@@ -28,6 +28,18 @@
       <node type="allow" cidr="172.16.0.0/12"/>
     </list>
 
+    <!-- Kimlik dogrulamayi Kamailio yapiyor; FreeSWITCH'in internal profili
+         auth-calls=false ile calisiyor. Bu ACL TEK savunma hattidir —
+         internal profil disariya acilmamalidir. Ayni CIDR'lar hem
+         apply-inbound-acl (kim SIP gonderebilir) hem apply-nat-acl (kimin
+         icin ext-rtp-ip/ext-sip-ip uygulanir) icin kullaniliyor
+         (bkz. sip_profiles/internal.xml.tmpl): profile Kamailio disinda
+         dogrudan hicbir yerden erisilebilir olmamali. -->
+    <list name="trusted" default="deny">
+      <node type="allow" cidr="172.16.0.0/12"/>   <!-- docker bridge -->
+      <node type="allow" cidr="127.0.0.0/8"/>
+    </list>
+
     <!--
 	This will traverse the directory adding all users
 	with the cidr= tag to this ACL, when this ACL matches

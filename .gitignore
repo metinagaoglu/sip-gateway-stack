@@ -10,6 +10,11 @@ freeswitch/conf/autoload_configs/event_socket.conf.xml
 freeswitch/conf/autoload_configs/switch.conf.xml
 freeswitch/conf/autoload_configs/pgsql.conf.xml
 freeswitch/conf/autoload_configs/db.conf.xml
-# xml_curl.conf.xml tasimiyor ama ayni bind-mount/render mekanizmasindan
-# geciyor; tutarlilik icin ayni sekilde yok sayiliyor.
+# xml_curl.conf.xml ve acl.conf.xml sir tasimiyor ama ayni bind-mount/render
+# mekanizmasindan geciyor; tutarlilik icin ayni sekilde yok sayiliyor.
 freeswitch/conf/autoload_configs/xml_curl.conf.xml
+freeswitch/conf/autoload_configs/acl.conf.xml
+
+# internal.xml.tmpl'den render edilir (Task 8); ayni bind-mount/render
+# mekanizmasi (sip_profiles de yazilabilir bagli).
+freeswitch/conf/sip_profiles/internal.xml
