@@ -7,27 +7,23 @@ docker compose up -d
 FSCLI="docker compose exec -T freeswitch fs_cli -p ${FS_ESL_PASSWORD} -x"
 for i in $(seq 1 45); do $FSCLI "status" >/dev/null 2>&1 && break; sleep 2; done
 
-# NOT: bu script HICBIR canli cagri (originate) kurmaz. Task 8 gelistirilirken
-# ampirik olarak defalarca dogrulandi ki bu FreeSWITCH derlemesinde
-# (1.10.12) mod_loopback ile kurulan bir cagrinin cift bacagi (bonded pair)
-# NASIL sonlandirilirsa sonlandirilsin — uuid_kill, sched_hangup, hatta
-# dialplan'in kendi sonundaki normal <action application="hangup"/> ile dogal
-# bitis — FreeSWITCH surecini SEGFAULT (exit code 139, docker events ile
-# dogrulandi) ile cokertiyor. Bu yuzden brief'in onerdigi
-# "originate loopback/9999/default &park()" + "uuid_kill" deseni BILEREK
-# KULLANILMIYOR — otomatik dogrulamanin kendisi FreeSWITCH'i her calistiginda
-# cokertirdi. Detaylar ve tekrar-uretilebilir kanit icin task-8-report.md'ye
-# bakin. mod_loopback bu yuzden autoload_configs/modules.conf.xml'de BILEREK
-# yuklenmiyor.
+# Adim 1-5 statik/introspection dogrulamasi yapar (profil, ACL, canli
+# konfigurasyon, dialplan yapisi). Adim 6-8 ise GERCEK bir SIP cagrisi kurar.
 #
-# Bu script yerine SADECE canli cagri gerektirmeyen, guvenli introspection
-# komutlariyla dogrular: profilin RUNNING olmasi ve dogru ext-ip duyurmasi,
-# canli (xml_locate ile ayristirilmis) konfigurasyonun auth-calls=false ve
-# ACL/outbound-proxy degerlerini gercekten tasidigi, ACL'in ic
-# (fs_cli "acl <ip> <liste>") test API'siyle GERCEKTEN neyi kabul/red
-# ettigi, ve dialplan'in xml_locate ile GERCEKTEN yuklendigi/cozuldugu.
-# Cift yonlu ses VE cagrinin gercekten ayakta kalip kalmadigi (mod_loopback
-# disi, gercek bir SIP cihazindan) Zoiper ile elle dogrulanir (Step 7).
+# TARIHCE — mod_loopback ve SIGSEGV: Task 8 gelistirilirken mod_loopback ile
+# kurulan sentetik cagrilarin sonlandirmada FreeSWITCH'i SEGFAULT ettirdigi
+# (exitCode 139) gozlendi ve bu script her turlu canli cagriyi kaldiracak
+# sekilde yazildi. Sonradan tek degiskenli olcumle gorulduki tetikleyici
+# mod_loopback DEGIL: 200 OK'e ACK GONDERMEYEN bir istemcinin cagrisi
+# medya calisirken (CS_EXECUTE) zaman asimiyla kapatildiginda FreeSWITCH
+# CS_REPORTING'de cokuyor. Duzgun ACK + BYE yapan gercek bir SIP cagrisi
+# (adim 7) surecin sag kalmasiyla tekrar tekrar dogrulandi. Bu yuzden gercek
+# cagri testi geri getirildi; hayatta kalma adim 8'de ayrica sinaniyor.
+# Not: ACK'siz istemci senaryosundaki cokme AYRI ve ACIK bir kusurdur,
+# bu script onu KASITLI OLARAK tetiklemez (bkz. task-8-report.md).
+#
+# Cift yonlu SES (RTP) hala elle dogrulanir — bu script sinyalizasyonu
+# kanitlar, ses akisini kanitlamaz.
 
 echo "--- 1. internal profili ayakta mi ---"
 $FSCLI "sofia status" | grep "internal" | grep -q "RUNNING" \
@@ -99,17 +95,53 @@ echo "$DIALPLAN_XML" | grep -q 'name="local-user"' \
 echo "$DIALPLAN_XML" | grep -q 'application="bridge" data="sofia/internal/\$1@\${domain_name}"' \
   || fail "local-user extension'i beklenen bridge hedefine sahip degil (sofia/internal/\$1@\${domain_name})"
 
-echo "OK: verify-08-echo (sinyalizasyon + ACL + canli konfigurasyon + dialplan yapisi)"
-echo "NOT: Bu script SADECE asagidakileri kanitlar:"
+echo "--- 6. Calisan Kamailio, repo'daki kamailio.cfg ile AYNI MI ---"
+# kamailio.cfg image'a COPY ediliyor, bind-mount EDILMIYOR. Bu yuzden
+# `docker compose restart kamailio` cfg degisikligini ALMAZ — sadece
+# `up -d --build` alir. Bu tuzak gercekten yasandi: consume_credentials()
+# eklendi, restart edildi, test yine FAIL verdi ve bir an "duzeltme ise
+# yaramadi" sanildi. Bu kontrol olmadan asagidaki cagri testi eski bir
+# konfigurasyonu test edip yaniltici sonuc verebilir.
+docker compose exec -T kamailio cat /etc/kamailio/kamailio.cfg > /tmp/kam-running.cfg 2>/dev/null \
+  || fail "calisan kamailio'dan kamailio.cfg okunamadi"
+if ! diff -q kamailio/kamailio.cfg /tmp/kam-running.cfg >/dev/null 2>&1; then
+  rm -f /tmp/kam-running.cfg
+  fail "calisan Kamailio eski konfigurasyonu kullaniyor — 'docker compose up -d --build kamailio' calistirin (restart YETMEZ, cfg image'a gomulu)"
+fi
+rm -f /tmp/kam-running.cfg
+
+echo "--- 7. GERCEK ucdan uca cagri: proxy uzerinden 9999, 200 OK ve temiz BYE ---"
+# Bu adim, adim 1-5'in KANITLAYAMADIGI seyi kanitlar: sinyalizasyonun
+# fiilen uctan uca calistigini. Onceki surumde bu script hic cagri
+# kurmuyordu ve bu yuzden Kamailio'nun Proxy-Authorization basligini
+# tuketmemesinden dogan 407 hatasi butun otomatik testlerden kacti
+# (FreeSWITCH, auth-calls=false olmasina ragmen istekte credential gorunce
+# kendi digest dogrulamasini calistirip "stale=true" 407 doner; kanal
+# CS_NEW'de kalir). Regresyonu burada yakaliyoruz.
+python3 tools/sip-call-probe.py \
+  --proxy "${EXTERNAL_IP}:5060" \
+  --domain "tenant1.voip.local" \
+  --user alice --password alice123 --dest 9999 \
+  || fail "proxy uzerinden 9999 cagrisi kurulamadi (yukaridaki probe ciktisina bakin)"
+
+echo "--- 8. Cagri sonrasi FreeSWITCH ayakta mi (SIGSEGV regresyonu) ---"
+# Task 8'de cagri sonlandirmanin FreeSWITCH'i SIGSEGV ile cokerttigi
+# (exitCode 139) gozlenmisti. Adim 7 gercek bir cagriyi BYE ile kapattigi
+# icin, surecin bu islemden SAG cikip cikmadigini burada dogruluyoruz.
+[ "$(docker inspect voip-freeswitch --format '{{.State.Status}}')" = "running" ] \
+  || fail "FreeSWITCH cagri sonrasi calismiyor"
+$FSCLI "status" >/dev/null 2>&1 \
+  || fail "FreeSWITCH cagri sonrasi ESL'e yanit vermiyor (cokup yeniden basladi olabilir)"
+
+echo "OK: verify-08-echo (sinyalizasyon + ACL + canli konfigurasyon + dialplan + GERCEK cagri)"
+echo "NOT: Bu script asagidakileri kanitlar:"
 echo "     - internal profili ayakta ve dogru ext-rtp-ip/ext-sip-ip duyuruyor,"
 echo "     - auth-calls=false + ACL/outbound-proxy degerleri CANLI konfigurasyonda dogru,"
 echo "     - trusted ACL'i GERCEKTEN sadece Kamailio/loopback'e izin veriyor (genel internet degil),"
 echo "     - dialplan GERCEKTEN yukleniyor ve 9999/9998/tenant-default/local-user extension'lari"
-echo "       xml_locate ile cozuluyor (yapisal dogruluk)."
-echo "NOT: Bu script KANITLAMAZ: 'echo' uygulamasinin fiilen calistigini, tenant_id'nin"
-echo "     bir cagri sirasinda GERCEKTEN set edildigini, veya herhangi bir RTP/ses akisini."
-echo "     Bunun nedeni guvenlik: mod_loopback ile kurulan sentetik bir cagriyi sonlandirmanin"
-echo "     (nasil sonlandirilirsa sonlandirilsin) bu ortamda FreeSWITCH'i cokerttigi ampirik"
-echo "     olarak dogrulandi (bkz. task-8-report.md) — otomatik bir 'cagri kur ve kapat' testi"
-echo "     GUVENLI DEGIL. Cagrinin fiilen calistigi VE cift yonlu ses saglandigi Zoiper ile"
-echo "     elle dogrulanir (Step 7)."
+echo "       xml_locate ile cozuluyor (yapisal dogruluk),"
+echo "     - calisan Kamailio repo'daki kamailio.cfg ile ayni (bayat image yok),"
+echo "     - proxy uzerinden 9999'a GERCEK bir cagri 200 OK aliyor ve BYE ile temiz kapaniyor,"
+echo "     - FreeSWITCH bu cagridan sag cikiyor."
+echo "NOT: Bu script KANITLAMAZ: RTP/ses akisini (cift yonlu ses) ve tenant_id'nin"
+echo "     cagri sirasinda GERCEKTEN set edildigini. Ses, Zoiper ile elle dogrulanir."
