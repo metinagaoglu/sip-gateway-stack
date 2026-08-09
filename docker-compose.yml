@@ -20,6 +20,22 @@ services:
       retries: 10
     networks: [voip_net]
 
+  kamailio:
+    build: ./kamailio
+    image: voip-kamailio
+    container_name: voip-kamailio
+    restart: unless-stopped
+    environment:
+      DBURL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      EXTERNAL_IP: ${EXTERNAL_IP}
+      SIP_DOMAIN: ${SIP_DOMAIN}
+    ports:
+      - "5060:5060/udp"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [voip_net]
+
 volumes:
   voip_pg_data:
 
