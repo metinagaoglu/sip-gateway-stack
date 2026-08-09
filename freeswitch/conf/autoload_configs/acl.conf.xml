@@ -14,6 +14,20 @@
       <node type="allow" cidr="192.168.42.42/32"/>
     </list>
 
+    <!-- ESL (event_socket) icin: sadece loopback.auto yeterli degil, cunku
+         compose 8021'i host'a publish ediyor ve Docker'in port-publish yolu
+         (docker-proxy/iptables DNAT) baglantiyi container'a loopback kaynakli
+         gibi GOSTERMIYOR. Docker bridge subnet'ini (voip_net,
+         docker-compose.yml'de 172.30.0.0/16 olarak sabitlendi, 172.16.0.0/12
+         icinde) beyaz listeye alarak hem docker compose exec (gercek
+         loopback) hem host'tan published port uzerinden gelen baglantilar
+         (bridge gateway kaynakli gorunur) calisir hale getiriliyor. -->
+    <list name="esl_access" default="deny">
+      <node type="allow" cidr="127.0.0.0/8"/>
+      <node type="allow" cidr="::1/128"/>
+      <node type="allow" cidr="172.16.0.0/12"/>
+    </list>
+
     <!--
 	This will traverse the directory adding all users
 	with the cidr= tag to this ACL, when this ACL matches

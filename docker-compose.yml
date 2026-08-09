@@ -90,3 +90,11 @@ volumes:
 networks:
   voip_net:
     driver: bridge
+    ipam:
+      config:
+        # Docker'in otomatik atadigi subnet host'a gore degisir (bu makinede
+        # 192.168.155.0/24 cikti, 172.16.0.0/12 disinda kaldi). ESL ACL'i
+        # (event_socket.conf.xml.tmpl -> acl.conf.xml) 172.16.0.0/12'yi
+        # beyaz listeye aliyor; bu subnet'i sabitlemek o kuralin her
+        # ortamda gercekten calismasini garantiliyor.
+        - subnet: 172.30.0.0/16
