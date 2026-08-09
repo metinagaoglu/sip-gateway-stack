@@ -37,10 +37,16 @@ EOF
   || fail "tenant1 seed edilmemis"
 [ "$(q "$POSTGRES_DB" "SELECT count(*) FROM subscriber WHERE username IN ('alice','bob')")" = "2" ] \
   || fail "alice/bob seed edilmemis"
-[ "$(q "$POSTGRES_DB" "SELECT count(*) FROM subscriber WHERE ha1 <> '' AND ha1b <> ''")" = "2" ] \
-  || fail "ha1/ha1b bos"
-[ "$(q "$POSTGRES_DB" "SELECT count(*) FROM dispatcher WHERE setid=1")" -ge 1 ] \
-  || fail "dispatcher satiri yok"
+[ "$(q "$POSTGRES_DB" "SELECT ha1 = md5('alice:tenant1.voip.local:alice123') FROM subscriber WHERE username='alice'")" = "t" ] \
+  || fail "alice ha1 yanlis realm ile hesaplanmis"
+[ "$(q "$POSTGRES_DB" "SELECT ha1b = md5('alice@tenant1.voip.local:tenant1.voip.local:alice123') FROM subscriber WHERE username='alice'")" = "t" ] \
+  || fail "alice ha1b yanlis realm ile hesaplanmis"
+[ "$(q "$POSTGRES_DB" "SELECT ha1 = md5('bob:tenant1.voip.local:bob123') FROM subscriber WHERE username='bob'")" = "t" ] \
+  || fail "bob ha1 yanlis realm ile hesaplanmis"
+[ "$(q "$POSTGRES_DB" "SELECT ha1b = md5('bob@tenant1.voip.local:tenant1.voip.local:bob123') FROM subscriber WHERE username='bob'")" = "t" ] \
+  || fail "bob ha1b yanlis realm ile hesaplanmis"
+[ "$(q "$POSTGRES_DB" "SELECT count(*) FROM dispatcher WHERE setid=1")" -eq 1 ] \
+  || fail "dispatcher satiri yok veya tekrarlanmis"
 
 # fs_directory tenant_id dondurmeli (CDR icin)
 q "$POSTGRES_DB" "SELECT tenant_id FROM fs_directory WHERE \"user\"='alice'" | grep -qE '^[0-9]+$' \

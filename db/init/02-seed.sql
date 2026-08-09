@@ -16,5 +16,7 @@ WHERE t.tenant_code = '1234'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO dispatcher (setid, destination, flags, priority, description)
-VALUES (1, 'sip:freeswitch:5060', 0, 0, 'FreeSWITCH node 1')
-ON CONFLICT DO NOTHING;
+SELECT 1, 'sip:freeswitch:5060', 0, 0, 'FreeSWITCH node 1'
+WHERE NOT EXISTS (
+    SELECT 1 FROM dispatcher WHERE setid = 1 AND destination = 'sip:freeswitch:5060'
+);
