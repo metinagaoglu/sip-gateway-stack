@@ -5,6 +5,7 @@ Provides directory and dialplan from PostgreSQL database
 """
 
 from flask import Flask, request, Response
+from xml.sax.saxutils import quoteattr
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
@@ -14,13 +15,27 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database configuration from environment
+# Database configuration from environment.
+#
+# POSTGRES_PASSWORD icin BILEREK varsayilan yok: sirlar yalnizca .env'den
+# gelmeli. Eskiden burada os.getenv('POSTGRES_PASSWORD', 'kamailio') vardi —
+# bu, yanlis/eksik yapilandirmada sessizce yanlis bir sifreyle baglanmaya
+# calisirdi (ve o sifre .env'deki gercek degerle uyusmazsa DB baglantisi
+# sessizce basarisiz olup uygulama "unhealthy" gorunurdu, ama NEDENI gizli
+# kalirdi). Simdi eksikse islem derhal ve acikca patlar.
+_POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD')
+if not _POSTGRES_PASSWORD:
+    raise RuntimeError(
+        "POSTGRES_PASSWORD ortam degiskeni tanimli degil. Sirlar yalnizca "
+        ".env uzerinden saglanmalidir; varsayilan sifre KULLANILMIYOR."
+    )
+
 DB_CONFIG = {
     'host': os.getenv('POSTGRES_HOST', 'postgres'),
     'port': os.getenv('POSTGRES_PORT', '5432'),
     'database': os.getenv('POSTGRES_DB', 'kamailio'),
     'user': os.getenv('POSTGRES_USER', 'kamailio'),
-    'password': os.getenv('POSTGRES_PASSWORD', 'kamailio')
+    'password': _POSTGRES_PASSWORD,
 }
 
 def get_db():
@@ -35,21 +50,47 @@ def get_db():
         logger.error(f"Database connection failed: {e}")
         raise
 
+# FreeSWITCH'e "bulunamadi" bildiren belge. HTTP 200 ile donuyor: mod_xml_curl
+# icin bu bir hata degil, "bu kaynaktan cevap yok" anlamina gelir ve FreeSWITCH
+# baska bir binding/statik konfigurasyona bakmaya devam eder.
+EMPTY_XML = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
+    '<document type="freeswitch/xml">\n'
+    '  <section name="result">\n'
+    '    <result status="not found"/>\n'
+    '  </section>\n'
+    '</document>'
+)
+
+
 def empty_xml_response():
-    """Return empty XML response"""
-    return Response(
-        '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
-        '<document type="freeswitch/xml"></document>',
-        mimetype='application/xml'
-    )
+    """Return empty/not-found XML response"""
+    return Response(EMPTY_XML, mimetype='application/xml')
+
+
+def _attr(value):
+    """XML oznitelik degeri: tirnaklar dahil, tamamen kacisli (escaped).
+
+    quoteattr hem ozel karakterleri (< > & " ') kacirir hem de sonucu
+    tirnak icine alir; cagiran taraf ayrica tirnak eklemez.
+    """
+    return quoteattr('' if value is None else str(value))
+
 
 @app.route('/fs/directory', methods=['GET', 'POST'])
 def directory():
     """
-    FreeSWITCH Directory Lookup
-    Returns user authentication and configuration
+    FreeSWITCH directory lookup.
+
+    Kimlik dogrulamayi Kamailio (digest auth ile) yapiyor ve FreeSWITCH
+    internal sofia profili auth-calls=false ile calisiyor; bu yuzden SIP
+    sifresi BILEREK donulmuyor (once buradan cleartext donuyordu).
+
+    tenant_id her zaman bir <variable> olarak eklenir; opsiyonel alanlar
+    null olsa bile bu deger hic eksik olmaz (fs_directory view'i tenants ile
+    INNER JOIN oldugu icin tenant_id hicbir zaman NULL degildir) — Task 10
+    CDR satirlarini buna gore tenant'a atfedecek.
     """
-    # Get parameters from FreeSWITCH
     params = request.values.to_dict()
     user = params.get('user')
     domain = params.get('domain')
@@ -57,89 +98,84 @@ def directory():
     logger.info(f"Directory request: user={user}, domain={domain}")
 
     if not user or not domain:
-        logger.warning("Missing user or domain parameter")
+        logger.warning("directory: user/domain eksik")
         return empty_xml_response()
 
     try:
         conn = get_db()
         cur = conn.cursor()
-
-        # Query fs_directory view
-        cur.execute("""
-            SELECT
-                "user",
-                domain,
-                tenant_code,
-                password,
-                "effective_caller_id_name",
-                "effective_caller_id_number",
-                "dial-string",
-                "max-calls",
-                "codec-prefs",
-                "call-timeout",
-                "vm-enabled",
-                "vm-password",
-                "forward-destination"
+        cur.execute(
+            """
+            SELECT tenant_id, tenant_code, "effective_caller_id_name",
+                   "effective_caller_id_number", "dial-string", "max-calls",
+                   "codec-prefs", "call-timeout", "vm-enabled",
+                   "forward-destination"
             FROM fs_directory
             WHERE "user" = %s AND domain = %s
-        """, (user, domain))
-
-        user_data = cur.fetchone()
+            """,
+            (user, domain),
+        )
+        row = cur.fetchone()
         cur.close()
         conn.close()
-
-        if not user_data:
-            logger.warning(f"User not found: {user}@{domain}")
-            return empty_xml_response()
-
-        # Generate FreeSWITCH XML
-        xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<document type="freeswitch/xml">
-  <section name="directory">
-    <domain name="{domain}">
-      <user id="{user}">
-        <params>
-          <param name="password" value="{user_data['password']}"/>
-          <param name="dial-string" value="{user_data['dial-string']}"/>
-        </params>
-        <variables>
-          <variable name="tenant_code" value="{user_data['tenant_code']}"/>
-          <variable name="effective_caller_id_name" value="{user_data['effective_caller_id_name']}"/>
-          <variable name="effective_caller_id_number" value="{user_data['effective_caller_id_number']}"/>
-          <variable name="max_calls" value="{user_data['max-calls']}"/>
-          <variable name="codec_prefs" value="{user_data['codec-prefs']}"/>
-          <variable name="call_timeout" value="{user_data['call-timeout']}"/>
-          <variable name="voicemail_enabled" value="{user_data['vm-enabled']}"/>
-"""
-
-        # Add optional variables
-        if user_data['vm-password']:
-            xml += f"""          <variable name="voicemail_password" value="{user_data['vm-password']}"/>
-"""
-        if user_data['forward-destination']:
-            xml += f"""          <variable name="forward_destination" value="{user_data['forward-destination']}"/>
-"""
-
-        xml += """        </variables>
-      </user>
-    </domain>
-  </section>
-</document>"""
-
-        logger.info(f"Directory lookup successful: {user}@{domain}")
-        return Response(xml, mimetype='application/xml')
-
-    except Exception as e:
-        logger.error(f"Directory lookup error: {e}")
+    except Exception as exc:
+        logger.error("directory sorgu hatasi: %s", exc)
         return empty_xml_response()
+
+    if not row:
+        logger.info("directory: bulunamadi %s@%s", user, domain)
+        return empty_xml_response()
+
+    variables = [
+        ('tenant_id', row['tenant_id']),
+        ('tenant_code', row['tenant_code']),
+        ('effective_caller_id_name', row['effective_caller_id_name']),
+        ('effective_caller_id_number', row['effective_caller_id_number']),
+        ('max_calls', row['max-calls']),
+        ('codec_prefs', row['codec-prefs']),
+        ('call_timeout', row['call-timeout']),
+        ('voicemail_enabled', row['vm-enabled']),
+    ]
+    if row['forward-destination']:
+        variables.append(('forward_destination', row['forward-destination']))
+
+    var_xml = '\n'.join(
+        '          <variable name={} value={}/>'.format(_attr(n), _attr(v))
+        for n, v in variables
+    )
+
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
+        '<document type="freeswitch/xml">\n'
+        '  <section name="directory">\n'
+        '    <domain name={}>\n'
+        '      <user id={}>\n'
+        '        <params>\n'
+        '          <param name="dial-string" value={}/>\n'
+        '        </params>\n'
+        '        <variables>\n'
+        '{}\n'
+        '        </variables>\n'
+        '      </user>\n'
+        '    </domain>\n'
+        '  </section>\n'
+        '</document>'
+    ).format(_attr(domain), _attr(user), _attr(row['dial-string']), var_xml)
+
+    logger.info("directory ok: %s@%s", user, domain)
+    return Response(xml, mimetype='application/xml')
+
 
 @app.route('/fs/dialplan', methods=['GET', 'POST'])
 def dialplan():
     """
-    FreeSWITCH Dialplan Lookup
-    Returns routing rules from database
+    FreeSWITCH dialplan lookup.
+
+    GUVENLIK NOTU: dialplan.actions sutunu ham XML fragment olarak
+    gomulur, kacirilmaz. Bu sutuna yalnizca yonetici tarafindan
+    dogrulanmis icerik yazilmalidir; bu sutun bir kod-enjeksiyonu
+    yuzeyidir ve kullanici girdisinden asla doldurulmamalidir.
     """
-    # Get parameters from FreeSWITCH
     params = request.values.to_dict()
     context = params.get('Hunt-Context', 'default')
     destination = params.get('Hunt-Destination-Number', '')
@@ -148,7 +184,7 @@ def dialplan():
     logger.info(f"Dialplan request: context={context}, destination={destination}, caller={caller_id}")
 
     if not destination:
-        logger.warning("Missing destination number")
+        logger.warning("dialplan: hedef numara eksik")
         return empty_xml_response()
 
     try:
@@ -177,36 +213,43 @@ def dialplan():
         rules = cur.fetchall()
         cur.close()
         conn.close()
-
-        if not rules:
-            logger.info(f"No dialplan rule found for {destination} in context {context}")
-            return empty_xml_response()
-
-        # Build XML with all matching rules
-        xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<document type="freeswitch/xml">
-  <section name="dialplan">
-    <context name="{context}">
-"""
-
-        for rule in rules:
-            xml += f"""      <extension name="db-rule-{rule['id']}" continue="false">
-        <condition field="destination_number" expression="{rule['destination_number']}">
-          {rule['actions']}
-        </condition>
-      </extension>
-"""
-
-        xml += """    </context>
-  </section>
-</document>"""
-
-        logger.info(f"Dialplan lookup successful: {len(rules)} rules for {destination}")
-        return Response(xml, mimetype='application/xml')
-
-    except Exception as e:
-        logger.error(f"Dialplan lookup error: {e}")
+    except Exception as exc:
+        logger.error("dialplan sorgu hatasi: %s", exc)
         return empty_xml_response()
+
+    if not rules:
+        logger.info(f"dialplan: {context} baglaminda {destination} icin kural yok")
+        return empty_xml_response()
+
+    extensions = []
+    for rule in rules:
+        # actions kasitli olarak _attr()'dan gecmiyor: ham XML fragment
+        # olarak gomuluyor (bkz. yukaridaki GUVENLIK NOTU).
+        extensions.append(
+            '      <extension name={} continue="false">\n'
+            '        <condition field="destination_number" expression={}>\n'
+            '          {}\n'
+            '        </condition>\n'
+            '      </extension>'.format(
+                _attr('db-rule-{}'.format(rule['id'])),
+                _attr(rule['destination_number']),
+                rule['actions'],
+            )
+        )
+
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
+        '<document type="freeswitch/xml">\n'
+        '  <section name="dialplan">\n'
+        '    <context name={}>\n'
+        '{}\n'
+        '    </context>\n'
+        '  </section>\n'
+        '</document>'
+    ).format(_attr(context), '\n'.join(extensions))
+
+    logger.info(f"dialplan ok: {len(rules)} kural, {destination}")
+    return Response(xml, mimetype='application/xml')
 
 @app.route('/health', methods=['GET'])
 def health():
