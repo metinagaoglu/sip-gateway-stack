@@ -31,6 +31,14 @@ services:
       SIP_DOMAIN: ${SIP_DOMAIN}
     ports:
       - "5060:5060/udp"
+    extra_hosts:
+      # tenant1.voip.local henuz gercek bir DNS kaydina sahip degil; seed'deki
+      # subscriber.ha1 tam olarak bu domain icin hesaplandi (bkz.
+      # db/init/02-seed.sql), o yuzden verify-04-register.sh'nin pozitif
+      # REGISTER testi bu adi cozebilmeli. Container'a elle /etc/hosts girmek
+      # yeniden olusturmada kaybolur; bu satir compose'un parcasi oldugu icin
+      # kalicidir.
+      - "tenant1.voip.local:127.0.0.1"
     depends_on:
       postgres:
         condition: service_healthy
