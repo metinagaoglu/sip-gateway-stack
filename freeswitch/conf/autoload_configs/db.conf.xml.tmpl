@@ -2,6 +2,6 @@
   <settings>
     <!-- PostgreSQL ODBC Connection String -->
     <!-- Format: pgsql://host:port/database?user=username&password=password -->
-    <param name="odbc-dsn" value="pgsql://host=postgres port=5432 dbname=kamailio user=kamailio password=kamailio options='-c client_encoding=utf8'"/>
+    <param name="odbc-dsn" value="pgsql://host=postgres port=5432 dbname=${POSTGRES_DB} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} options='-c client_encoding=utf8'"/>
   </settings>
 </configuration>

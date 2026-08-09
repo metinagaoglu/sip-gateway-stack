@@ -146,9 +146,10 @@
     <!-- <param name="timer-affinity" value="disabled"/> -->
     <!-- NEEDS DOCUMENTATION -->
 
-    <!-- RTP port range -->
-    <!-- <param name="rtp-start-port" value="16384"/> -->
-    <!-- <param name="rtp-end-port" value="32768"/> -->
+    <!-- RTP port range: compose'daki ${RTP_START}-${RTP_END} port publish
+         araligiyla birebir eslesmesi gerekiyor (bkz. docker-compose.yml). -->
+    <param name="rtp-start-port" value="${RTP_START}"/>
+    <param name="rtp-end-port" value="${RTP_END}"/>
 
     <!-- Test each port to make sure it is not in use by some other process before allocating it to RTP -->
     <!-- <param name="rtp-port-usage-robustness" value="true"/> -->
@@ -183,6 +184,12 @@
     <!-- <param name="core-db-dsn" value="mariadb://Server=localhost;Database=freeswitch;Uid=freeswitch;Pwd=pass;" /> -->
     <!-- <param name="core-db-dsn" value="dsn:username:password" /> -->
 
+    <!-- Core durumu (channels/calls/tasks/sofia_reg_*/limit_data) artik
+         SQLite yerine PostgreSQL'de. Dockerfile bu build'i
+         enable-core-pgsql-support configure bayragiyla derliyor. host=postgres,
+         docker-compose.yml'deki "postgres" servisinin DNS adi. -->
+    <param name="core-db-dsn" value="pgsql://host=postgres port=5432 dbname=${FS_DB_NAME} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD}"/>
+
     <!-- <param name="odbc-skip-autocommit-flip" value="true" /> -->
 
     <!-- 
@@ -204,6 +211,15 @@
     <!-- <param name="max-audio-channels" value="2"/> -->
 
   </settings>
+
+  <!-- Global degiskenler: sonraki dialplan/profil isleri icin (Task 11 dahil)
+       tek yerden $${sip_domain}, $${external_ip} vb. olarak erisilebilir. -->
+  <variables>
+    <variable name="sip_domain" value="${SIP_DOMAIN}"/>
+    <variable name="external_ip" value="${EXTERNAL_IP}"/>
+    <variable name="global_codec_prefs" value="OPUS,PCMU,PCMA"/>
+    <variable name="outbound_codec_prefs" value="OPUS,PCMU,PCMA"/>
+  </variables>
 
 </configuration>
 

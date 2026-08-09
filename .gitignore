@@ -7,3 +7,6 @@ freeswitch/build.log
 # bu ciktilar sirlar icerebilir (orn. FS_ESL_PASSWORD) ve asla commit edilmemeli.
 # Bind-mount nedeniyle host'ta da olusurlar (bkz. freeswitch/entrypoint.sh).
 freeswitch/conf/autoload_configs/event_socket.conf.xml
+freeswitch/conf/autoload_configs/switch.conf.xml
+freeswitch/conf/autoload_configs/pgsql.conf.xml
+freeswitch/conf/autoload_configs/db.conf.xml
