@@ -16,11 +16,25 @@ esac
 VER=$(docker run --rm --entrypoint kamailio voip-kamailio -v | head -1)
 echo "$VER" | grep -q "6\.0\." || fail "beklenmeyen kamailio surumu: $VER"
 
+# kamailio.cfg sozdizim kontrolu. -c/-f gercek CMD'yi kullanmaz ve cfg'yi hic
+# yuklemez, o yuzden ayrica calistiriyoruz. DBURL/EXTERNAL_IP/SIP_DOMAIN'i
+# compose'un enjekte ettigi degiskenlerle ayni adlarla veriyoruz cunku
+# `kamailio -c`, cfg'deki $env(...) substitutionlari build-time'da degil
+# calisma zamaninda gordugu ortam degiskenleriyle cozer; deger tanimsizsa
+# parser "unclosed string" hatasi ile durur (bkz. task-3-report.md). Bu yuzden
+# kontrol Dockerfile'a build-time RUN olarak degil, buraya konuldu.
+docker run --rm \
+    -e EXTERNAL_IP=127.0.0.1 \
+    -e SIP_DOMAIN=voip.local \
+    -e DBURL="postgres://u:p@postgres:5432/db" \
+    --entrypoint kamailio voip-kamailio -c -f /etc/kamailio/kamailio.cfg \
+    || fail "kamailio.cfg sozdizimi hatali (kamailio -c basarisiz)"
+
 for m in dispatcher auth_db usrloc registrar db_postgres tm rr; do
-  docker run --rm --entrypoint sh voip-kamailio -c \
+  OUT=$(docker run --rm --entrypoint sh voip-kamailio -c \
     "test -f /usr/lib/x86_64-linux-gnu/kamailio/modules/${m}.so || \
-     test -f /usr/lib/aarch64-linux-gnu/kamailio/modules/${m}.so" \
-    || fail "modul yok: ${m}.so"
+     test -f /usr/lib/aarch64-linux-gnu/kamailio/modules/${m}.so" 2>&1) \
+    || fail "modul kontrolu basarisiz: ${m}.so (docker run cikisi: ${OUT:-yok})"
 done
 
 echo "OK: verify-03-kamailio-image"
