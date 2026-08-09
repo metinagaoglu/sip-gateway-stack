@@ -20,8 +20,11 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Tesis/hata ayiklama araclari
+# sipsak: verify-04-register.sh REGISTER challenge (401/407) testini yapar.
+# Build-time'da imaja gomulu; calisma zamaninda apt-get ile kurulmuyor ki
+# konteyner immutable kalsin ve test agdan/paket deposundan bagimsiz olsun.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends iputils-ping netcat-openbsd procps && \
+    apt-get install -y --no-install-recommends iputils-ping netcat-openbsd procps sipsak && \
     rm -rf /var/lib/apt/lists/*
 
 COPY kamailio.cfg /etc/kamailio/kamailio.cfg
