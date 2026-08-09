@@ -3,7 +3,10 @@
 # ============================================================================
 FROM debian:bullseye-slim AS builder
 
-ARG FS_VERSION=v1.10
+ARG FS_VERSION=v1.10.12
+ARG SOFIA_VERSION=v1.13.18
+ARG SPANDSP_COMMIT=0d2e6ac65e0e8f53d652665a743015a88bf048d4
+ARG LIBKS_VERSION=v2.0.7
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig
@@ -30,8 +33,13 @@ RUN apt-get update && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Adım 2: libks (KitSun Signal) - mod_verto ve mod_signalwire için gerekli
+# NOT: --depth 1 kullanilamaz; libks'in CMakeLists.txt'i changelog uretmek icin
+# etiketten once en az bir commit'e (v2.0.7^) erisim gerektiriyor, sig clone
+# --depth 1 bunu kirpip "fatal: Not a valid object name v2.0.7^" ile configure'u
+# bozuyor. Tam klon + sabit etiket checkout ediyoruz; surum yine sabit kaliyor.
 WORKDIR /usr/src/libks
-RUN git clone https://github.com/signalwire/libks.git . && \
+RUN git clone --branch ${LIBKS_VERSION} \
+        https://github.com/signalwire/libks.git . && \
     cmake . && \
     make -j$(nproc) && \
     make install && \
@@ -39,7 +47,8 @@ RUN git clone https://github.com/signalwire/libks.git . && \
 
 # Adım 3: Sofia-SIP kütüphanesi
 WORKDIR /usr/src/sofia-sip
-RUN git clone https://github.com/freeswitch/sofia-sip.git . && \
+RUN git clone --branch ${SOFIA_VERSION} --depth 1 \
+        https://github.com/freeswitch/sofia-sip.git . && \
     ./bootstrap.sh -j && \
     ./configure --prefix=/usr/local && \
     make -j$(nproc) && \
@@ -49,16 +58,17 @@ RUN git clone https://github.com/freeswitch/sofia-sip.git . && \
 # Adım 4: SPANDSP kütüphanesi (FAX ve ses kodlama)
 WORKDIR /usr/src/spandsp
 RUN git clone https://github.com/freeswitch/spandsp.git . && \
-    git reset --hard 0d2e6ac65e0e8f53d652665a743015a88bf048d4 && \
+    git reset --hard ${SPANDSP_COMMIT} && \
     ./bootstrap.sh -j && \
     ./configure --prefix=/usr/local && \
     make -j$(nproc) && \
     make install && \
     ldconfig
 
-# Adım 5: FreeSWITCH kaynak kodunu klonla
+# Adım 5: FreeSWITCH kaynak kodunu klonla (sabitlenmiş sürüm etiketi, dal değil)
 WORKDIR /usr/src/freeswitch
-RUN git clone -b ${FS_VERSION} https://github.com/signalwire/freeswitch.git .
+RUN git clone --branch ${FS_VERSION} --depth 1 \
+        https://github.com/signalwire/freeswitch.git .
 
 # Adım 6: Bootstrap ve Configure (Modülleri yapılandır)
 RUN \
@@ -115,6 +125,7 @@ RUN apt-get update && \
     libpq5 libmariadb3 \
     libncurses6 libglib2.0-0 \
     libuuid1 libxml2 \
+    gettext-base libcap2-bin \
     procps psmisc nano curl iputils-ping netcat-openbsd less && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -138,9 +149,22 @@ RUN mkdir -p /opt/freeswitch/log \
 # Adım 5: Sistem kütüphanelerini güncelle
 RUN ldconfig
 
+# Adım 5b: SCHED_FIFO icin dosya capability'si tanimla.
+# cap_add: SYS_NICE compose'da bounding set'e ekliyor ama konteyner
+# "freeswitch" (uid 1000, root degil) olarak basladigi icin bu capability
+# process'in effective/permitted/ambient kumesine hic girmiyor — bounding
+# set'te olmasi tek basina yetmiyor. Binary'ye dosya capability'si vererek
+# execve sirasinda non-root process'in de bu capability'yi effective olarak
+# almasi sagalaniyor.
+RUN setcap 'cap_sys_nice=+ep' /opt/freeswitch/bin/freeswitch
+
 # Adım 6: Symlink'ler oluştur (opsiyonel)
 RUN ln -sf /opt/freeswitch/bin/freeswitch /usr/bin/freeswitch && \
     ln -sf /opt/freeswitch/bin/fs_cli /usr/bin/fs_cli
+
+# Adım 6b: entrypoint betiğini kur (*.tmpl sablonlarini envsubst ile isler)
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # FreeSWITCH kullanıcısına geç (root değil!)
 USER freeswitch
@@ -152,8 +176,15 @@ EXPOSE 8021/tcp
 EXPOSE 16384-32768/udp
 
 # Adım 8: Sağlık kontrolü
+# Shell formunda CALISTIRILIYOR ki $FS_ESL_PASSWORD ortam degiskeni her
+# kontrolde interpolate edilsin — sifre burada literal yazilmiyor, compose'un
+# "environment:" kismindan geliyor (bkz. docker-compose.yml, .env).
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD fs_cli -x "status" || exit 1
+    CMD fs_cli -p "$FS_ESL_PASSWORD" -x "status" || exit 1
 
 # Adım 9: FreeSWITCH'i başlat
-CMD ["/opt/freeswitch/bin/freeswitch", "-nonat", "-nonatmap", "-nf", "-c"]
+# entrypoint.sh once *.tmpl sablonlarini render eder, sonra CMD'yi exec eder.
+# -nonat kaldirildi: ext-rtp-ip ile acik adres duyurulacagi icin NAT tespiti
+# gerekiyor (vanilla -nonat NAT otomatik algilamasini tamamen kapatir).
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["/opt/freeswitch/bin/freeswitch", "-nf", "-nonatmap", "-c"]
