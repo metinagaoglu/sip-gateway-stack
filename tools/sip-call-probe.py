@@ -224,7 +224,11 @@ class Probe:
                 continue
             code = line.split()[1]
             self.log(f"    <- {line}")
-            if code == "100":
+            # TUM 1xx provisional yanitlar atlanir, sadece 100 degil.
+            # Kullanicidan kullaniciya cagrida cagrilan taraf 180 Ringing
+            # gonderir; yalnizca 100 atlanirsa 180 final yanit sanilip
+            # "200 OK bekleniyordu, 180 geldi" ile hatali FAIL uretilir.
+            if code.startswith("1"):
                 continue
             if re.match(want, code):
                 return code, txt

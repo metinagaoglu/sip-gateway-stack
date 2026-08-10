@@ -95,8 +95,12 @@ echo "$DIALPLAN_XML" | grep -q 'application="echo"' \
   || fail "echo-test extension'i 'echo' uygulamasini cagirmiyor"
 echo "$DIALPLAN_XML" | grep -q 'name="local-user"' \
   || fail "dialplan'da local-user (kullanicidan kullaniciya) extension'i yok"
-echo "$DIALPLAN_XML" | grep -q 'application="bridge" data="sofia/internal/\$1@\${domain_name}"' \
-  || fail "local-user extension'i beklenen bridge hedefine sahip degil (sofia/internal/\$1@\${domain_name})"
+# ${sip_from_host} KASITLI: ${domain_name} bu yiginda hic set edilmez
+# (kimlik dogrulamasi Kamailio'da, FreeSWITCH directory'sinde degil) ve
+# FreeSWITCH onun yerine kendi yerel IP'sini koyar -> Kamailio use_domain=1
+# ile bulamaz, 404 doner. Bkz. dialplan/default.xml icindeki aciklama.
+echo "$DIALPLAN_XML" | grep -q 'application="bridge" data="sofia/internal/\$1@\${sip_from_host}"' \
+  || fail "local-user extension'i beklenen bridge hedefine sahip degil (sofia/internal/\$1@\${sip_from_host}) — \${domain_name} kullanilirsa domain yerine konteyner IP'si gecer ve Kamailio 404 doner"
 
 echo "--- 6. Calisan Kamailio, repo'daki kamailio.cfg ile AYNI MI ---"
 # kamailio.cfg image'a COPY ediliyor, bind-mount EDILMIYOR. Bu yuzden

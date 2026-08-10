@@ -31,11 +31,34 @@
     <!-- Kullanicidan kullaniciya: FreeSWITCH kayitlari bilmedigi icin
          cagri Kamailio'ya geri gonderilir (profil outbound-proxy'si),
          Kamailio lookup("location") ile aboneye ulastirir. -->
+    <!-- Desen NEDEN boyle: aboneler seed'de kullanici ADIYLA tanimli
+         (alice, bob) — numerik bir extension eslemesi yok. Onceki
+         `^(\d{2,7})$` yalnizca rakam kabul ettigi icin `bob` aramasi bu
+         extension'a HIC dusmuyordu ve cagri sessizce duşuyordu.
+         Iki kol var:
+           - `[a-zA-Z][a-zA-Z0-9_.-]{1,31}` : HARFLE BASLAYAN kullanici adi
+           - `\d{2,7}`                      : kisa numerik dahili
+         Harfle baslama sarti ve numerik kolun 7 haneyle sinirli olmasi
+         KASITLI: boylece `05551234567` gibi uzun bir numara buraya DUSMEZ
+         ve Task 12'nin trunk desenine kalir. Desen genisletilirken bu
+         siniri korumak gerekir. -->
     <extension name="local-user">
-      <condition field="destination_number" expression="^(\d{2,7})$">
+      <condition field="destination_number" expression="^([a-zA-Z][a-zA-Z0-9_.-]{1,31}|\d{2,7})$">
         <action application="set" data="call_timeout=30"/>
         <action application="set" data="hangup_after_bridge=true"/>
-        <action application="bridge" data="sofia/internal/$1@${domain_name}"/>
+        <!-- NEDEN ${domain_name} DEGIL: `domain_name` kanal degiskeni ancak
+             cagiran taraf FreeSWITCH directory'sinden dogrulandiginda set
+             edilir. Bu yiginda kimlik dogrulamasi Kamailio'da yapiliyor
+             (auth-calls=false), dolayisiyla degisken HIC set edilmiyor ve
+             FreeSWITCH onun yerine kendi yerel adresini koyuyordu:
+             b-leg `sofia/internal/bob@172.30.0.3` olarak cikiyor, Kamailio
+             ise use_domain=1 ile `bob@tenant1.voip.local` aradigi icin
+             lookup("location") basarisiz olup 404 donuyordu.
+             ${sip_from_host} DOGRULANMIS bir degerdir: Kamailio digest
+             realm'i olarak From domain'ini kullanir, yani cagri gercekten
+             o kiracidan gelir. Boylece cagri arayanin kiracisinda kalir
+             (cross-tenant arama olmaz). -->
+        <action application="bridge" data="sofia/internal/$1@${sip_from_host}"/>
       </condition>
     </extension>
 
