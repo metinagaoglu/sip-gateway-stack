@@ -22,8 +22,9 @@ for i in $(seq 1 45); do $FSCLI "status" >/dev/null 2>&1 && break; sleep 2; done
 # Not: ACK'siz istemci senaryosundaki cokme AYRI ve ACIK bir kusurdur,
 # bu script onu KASITLI OLARAK tetiklemez (bkz. task-8-report.md).
 #
-# Cift yonlu SES (RTP) hala elle dogrulanir — bu script sinyalizasyonu
-# kanitlar, ses akisini kanitlamaz.
+# Cift yonlu SES artik otomatik dogrulaniyor: adim 7 gercek RTP gonderip
+# echo'nun yansimasini sayiyor. Elle kalan tek sey ses KALITESI (jitter,
+# kopma) — onu kulakla dinlemek gerekir.
 
 echo "--- 1. internal profili ayakta mi ---"
 $FSCLI "sofia status" | grep "internal" | grep -q "RUNNING" \
@@ -55,6 +56,8 @@ echo "$SOFIA_XML" | grep -q "name=\"ext-rtp-ip\" value=\"${EXTERNAL_IP}\"" \
   || fail "ext-rtp-ip canli konfigurasyonda ${EXTERNAL_IP} degil (xml_locate)"
 echo "$SOFIA_XML" | grep -q "name=\"ext-sip-ip\" value=\"${EXTERNAL_IP}\"" \
   || fail "ext-sip-ip canli konfigurasyonda ${EXTERNAL_IP} degil (xml_locate)"
+echo "$SOFIA_XML" | grep -q 'name="local-network-acl" value="none"' \
+  || fail "local-network-acl canli konfigurasyonda 'none' degil — varsayilan localnet.auto Kamailio'yu (172.x) yerel sayar, SDP'de ext-rtp-ip yerine konteyner adresi duyurulur ve CAGRI KURULUR AMA SES AKMAZ"
 echo "$SOFIA_XML" | grep -q 'name="apply-inbound-acl" value="trusted"' \
   || fail "apply-inbound-acl canli konfigurasyonda trusted degil — profil disariya acik olabilir"
 echo "$SOFIA_XML" | grep -q 'name="apply-nat-acl" value="trusted"' \
@@ -110,7 +113,7 @@ if ! diff -q kamailio/kamailio.cfg /tmp/kam-running.cfg >/dev/null 2>&1; then
 fi
 rm -f /tmp/kam-running.cfg
 
-echo "--- 7. GERCEK ucdan uca cagri: proxy uzerinden 9999, 200 OK ve temiz BYE ---"
+echo "--- 7. GERCEK ucdan uca cagri: 200 OK + SDP adresi + RTP echo + temiz BYE ---"
 # Bu adim, adim 1-5'in KANITLAYAMADIGI seyi kanitlar: sinyalizasyonun
 # fiilen uctan uca calistigini. Onceki surumde bu script hic cagri
 # kurmuyordu ve bu yuzden Kamailio'nun Proxy-Authorization basligini
@@ -118,11 +121,18 @@ echo "--- 7. GERCEK ucdan uca cagri: proxy uzerinden 9999, 200 OK ve temiz BYE -
 # (FreeSWITCH, auth-calls=false olmasina ragmen istekte credential gorunce
 # kendi digest dogrulamasini calistirip "stale=true" 407 doner; kanal
 # CS_NEW'de kalir). Regresyonu burada yakaliyoruz.
+#
+# --expect-media-ip ayrica "cagri kuruluyor ama ses yok" sinifini yakalar:
+# FreeSWITCH SDP'de konteyner adresini (172.x) duyurursa hicbir dis istemci
+# oraya RTP gonderemez. Probe ustune GERCEK RTP gonderip echo'nun yansimasini
+# sayar — bu, sinyalizasyonun kanitlayamadigi tek sey olan medya yolunu
+# kanitlar.
 python3 tools/sip-call-probe.py \
   --proxy "${EXTERNAL_IP}:5060" \
   --domain "tenant1.voip.local" \
   --user alice --password alice123 --dest 9999 \
-  || fail "proxy uzerinden 9999 cagrisi kurulamadi (yukaridaki probe ciktisina bakin)"
+  --expect-media-ip "${EXTERNAL_IP}" \
+  || fail "proxy uzerinden 9999 cagrisi/medyasi dogrulanamadi (yukaridaki probe ciktisina bakin)"
 
 echo "--- 8. Cagri sonrasi FreeSWITCH ayakta mi (SIGSEGV regresyonu) ---"
 # Task 8'de cagri sonlandirmanin FreeSWITCH'i SIGSEGV ile cokerttigi
@@ -141,7 +151,8 @@ echo "     - trusted ACL'i GERCEKTEN sadece Kamailio/loopback'e izin veriyor (ge
 echo "     - dialplan GERCEKTEN yukleniyor ve 9999/9998/tenant-default/local-user extension'lari"
 echo "       xml_locate ile cozuluyor (yapisal dogruluk),"
 echo "     - calisan Kamailio repo'daki kamailio.cfg ile ayni (bayat image yok),"
-echo "     - proxy uzerinden 9999'a GERCEK bir cagri 200 OK aliyor ve BYE ile temiz kapaniyor,"
+echo "     - proxy uzerinden 9999'a GERCEK bir cagri 200 OK aliyor, SDP'de EXTERNAL_IP"
+echo "       duyuruluyor, RTP echo GERCEKTEN yansiyor ve cagri BYE ile temiz kapaniyor,"
 echo "     - FreeSWITCH bu cagridan sag cikiyor."
-echo "NOT: Bu script KANITLAMAZ: RTP/ses akisini (cift yonlu ses) ve tenant_id'nin"
-echo "     cagri sirasinda GERCEKTEN set edildigini. Ses, Zoiper ile elle dogrulanir."
+echo "NOT: Bu script KANITLAMAZ: ses KALITESINI (jitter/kopma) ve tenant_id'nin"
+echo "     CDR'a GERCEKTEN yazildigini (Task 10). Ses kalitesi Zoiper ile elle dinlenir."

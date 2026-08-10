@@ -11,6 +11,21 @@
     <param name="ext-rtp-ip" value="${EXTERNAL_IP}"/>
     <param name="ext-sip-ip" value="${EXTERNAL_IP}"/>
 
+    <!-- ext-rtp-ip/ext-sip-ip'yi ayarlamak TEK BASINA YETMEZ. FreeSWITCH,
+         uzak tarafi "yerel ag" sayarsa SDP'de ext-* degerlerini DEGIL
+         rtp-ip'yi (yani konteynerin 172.x adresini) duyurur. Varsayilan
+         local-network-acl=localnet.auto butun RFC1918 aralklarini yerel
+         sayar; sinyalizasyon Kamailio'dan (172.30.0.x) geldigi icin uzak
+         taraf yerel gorunur ve ext-rtp-ip hic devreye girmez.
+         Belirti: cagri kuruluyor, 200 OK geliyor, dialplan/echo calisiyor,
+         ama SES YOK — cunku SDP'de c=IN IP4 172.30.0.3 duyurulur ve dis
+         istemci oraya RTP gonderemez.
+         `none` ile hicbir peer yerel sayilmaz, ext-* her zaman kullanilir.
+         Bu dogru secim, cunku bu profilin tek SIP komsusu Kamailio'dur ve
+         medyanin karsi tarafi HER ZAMAN docker agi disindadir.
+         Regresyon testi: verify-08 adim 7 (SDP adresi + gercek RTP echo). -->
+    <param name="local-network-acl" value="none"/>
+
     <!-- Kimlik dogrulama Kamailio'da; burada ACL ile guven. -->
     <param name="auth-calls" value="false"/>
     <param name="apply-inbound-acl" value="trusted"/>

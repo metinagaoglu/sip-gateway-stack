@@ -56,6 +56,85 @@ def digest_response(user, password, realm, nonce, method, uri, chal):
     return "Digest " + ", ".join(parts)
 
 
+def parse_sdp_media(msg):
+    """SDP govdesinden (c= adresi, m=audio portu) dondurur."""
+    body = msg.split("\r\n\r\n", 1)
+    if len(body) < 2:
+        return None, None
+    sdp = body[1]
+    c = re.search(r"^c=IN IP4 (\S+)", sdp, re.M)
+    m = re.search(r"^m=audio (\d+)", sdp, re.M)
+    if not c or not m:
+        return None, None
+    return c.group(1), int(m.group(1))
+
+
+def rtp_echo_test(ip, port, local_port, count, settle):
+    """PCMU RTP gonderir, geri yansiyan paketleri sayar.
+
+    `echo` uygulamasi aldigini geri gonderir; geri gelen paket sayisi > 0 ise
+    medya yolu GERCEKTEN iki yonlu calisiyor demektir — SIP sinyalizasyonunun
+    kanitlayamadigi tek sey budur.
+
+    Iki tasarim detayi testi kirilgan olmaktan kurtariyor:
+      1. `settle` beklemesi: dialplan 9999'da answer'dan sonra sleep(500) var,
+         yani echo ilk yarim saniye HENUZ CALISMIYOR. Beklemeden gonderilirse
+         paketlerin cogu bosluga gider ve sonuc 25'te 2 gibi marjinal cikar.
+      2. Gonderim ve okuma IC ICE: her paketten sonra non-blocking okuma
+         yapiliyor. Once-gonder-sonra-dinle deseninde, gonderim bittiginde
+         echo'nun yansitacagi paket kalmadigi icin donus suni olarak dusuk
+         olur.
+    """
+    rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    rx.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        rx.bind(("0.0.0.0", local_port))
+    except OSError:
+        rx.bind(("0.0.0.0", 0))
+    rx.setblocking(False)
+
+    time.sleep(settle)
+
+    ssrc = random.getrandbits(32)
+    payload = b"\xff" * 160          # PCMU sessizlik
+    sent = got = 0
+
+    def drain():
+        nonlocal got
+        while True:
+            try:
+                data, _ = rx.recvfrom(2048)
+            except (BlockingIOError, socket.timeout):
+                return
+            except OSError:
+                return
+            # Kendi paketlerimizi saymamak icin farkli SSRC ariyoruz.
+            if len(data) >= 12 and data[0] & 0xC0 == 0x80:
+                if int.from_bytes(data[8:12], "big") != ssrc:
+                    got += 1
+
+    for seq in range(count):
+        hdr = (b"\x80\x00"
+               + (seq & 0xFFFF).to_bytes(2, "big")
+               + ((seq * 160) & 0xFFFFFFFF).to_bytes(4, "big")
+               + ssrc.to_bytes(4, "big"))
+        try:
+            rx.sendto(hdr + payload, (ip, port))
+            sent += 1
+        except OSError:
+            break
+        time.sleep(0.02)             # 20 ms ptime
+        drain()
+
+    # Kuyrukta kalan yansimalar icin kisa bir tahliye penceresi.
+    end = time.time() + 0.6
+    while time.time() < end:
+        drain()
+        time.sleep(0.02)
+    rx.close()
+    return sent, got
+
+
 class Probe:
     def __init__(self, a):
         self.a = a
@@ -222,7 +301,48 @@ class Probe:
         self.log("  4) ACK (200 OK icin)")
         self.s.send(self.ack(2, self.branch(), to_hdr, True).encode())
 
-        self.log(f"  5) cagri {a.hold}s ayakta tutuluyor")
+        # --- Medya: SDP'de duyurulan adres/port ---
+        media_ip, media_port = parse_sdp_media(txt)
+        if media_ip is None:
+            self.log("FAIL: 200 OK icinde ayristirilabilir bir SDP yok")
+            return 1
+        self.log(f"  5) uzak medya adresi: {media_ip}:{media_port}")
+
+        # Bu kontrol AGDAN BAGIMSIZ ve deterministik: FreeSWITCH konteyner-ici
+        # adresini (172.x) duyurursa hicbir dis istemci oraya RTP gonderemez ve
+        # "cagri kuruluyor ama ses yok" olur. Sebebi genelde local-network-acl:
+        # varsayilan `localnet.auto` RFC1918'i "yerel" saydigi icin, sinyalin
+        # geldigi Kamailio (172.x) yerel gorunur ve ext-rtp-ip DEVREYE GIRMEZ.
+        if a.expect_media_ip and media_ip != a.expect_media_ip:
+            self.log(f"FAIL: SDP'de {a.expect_media_ip} bekleniyordu, "
+                     f"{media_ip} duyuruldu")
+            if media_ip.startswith(("172.", "10.", "192.168.")) \
+                    and media_ip != a.expect_media_ip:
+                self.log("  >>> Duyurulan adres bir ic/konteyner adresi. "
+                         "FreeSWITCH ext-rtp-ip'yi kullanmiyor — sip_profiles/"
+                         "internal.xml icinde local-network-acl=none gerekiyor "
+                         "(varsayilan localnet.auto, Kamailio'yu yerel sayar).")
+            return 1
+
+        # --- Gercek RTP: echo donuyor mu ---
+        self.log(f"  6) RTP echo olcumu ({a.rtp_packets} paket PCMU)")
+        sent, got = rtp_echo_test(media_ip, media_port, self.a.rtp_port,
+                                  a.rtp_packets, a.rtp_settle)
+        pct = (100 * got // sent) if sent else 0
+        self.log(f"     gonderildi={sent} alindi={got} ({pct}%)")
+        # Esik neden 0 degil: bir-iki paket, yolun gercekten calistigini degil
+        # tesadufi bir yansimayi da gosterebilir. Echo saglikli calistiginda
+        # donus orani yuksektir; %25 kayip toleransi birakip altini basarisiz
+        # sayiyoruz ki "ses var ama kirik" durumu yesil gorunmesin.
+        if got < max(1, sent // 4):
+            self.log(f"FAIL: RTP echo yetersiz ({got}/{sent}) — cagri kuruldu "
+                     "ama ses akmiyor veya ciddi kayip var")
+            self.log("  >>> Kontrol: SDP adresi/portu erisilebilir mi, RTP port "
+                     "araligi compose'da publish edilmis mi (16384-16403), echo "
+                     "uygulamasi calisti mi (fs_cli loglari).")
+            return 1
+
+        self.log(f"  7) cagri {a.hold}s ayakta tutuluyor")
         time.sleep(a.hold)
 
         # 3) BYE ile kapat. Bu adim ayni zamanda "cagri sonlandirmada
@@ -247,6 +367,13 @@ def main():
     p.add_argument("--dest", required=True)
     p.add_argument("--hold", type=float, default=2.0)
     p.add_argument("--rtp-port", type=int, default=40200)
+    p.add_argument("--expect-media-ip", default=None,
+                   help="SDP'de duyurulmasi beklenen medya adresi "
+                        "(genelde EXTERNAL_IP)")
+    p.add_argument("--rtp-packets", type=int, default=50)
+    p.add_argument("--rtp-settle", type=float, default=0.8,
+                   help="RTP gondermeden once beklenecek sure; dialplan\n"
+                        "9999 answer sonrasi sleep(500) yapiyor")
     sys.exit(Probe(p.parse_args()).run())
 
 
