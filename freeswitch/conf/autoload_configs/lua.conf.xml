@@ -13,7 +13,15 @@
     These entries will be pre-pended to the LUA_PATH environment variable
     -->
     <!-- <param name="script-directory" value="/usr/local/lua/?.lua"/> -->
-    <!-- <param name="script-directory" value="$${script_dir}/?.lua"/> -->
+    <!-- ACIK OLMASI ZORUNLU. Vanilla dosyada bu satir yorumdaydi, yani LUA_PATH
+         hic ayarlanmiyordu ve `lua <script>` API'si scriptleri BULAMIYORDU:
+             fs_cli -x "lua max_calls.lua ..."  ->  -ERR Cannot execute script
+         Dosya /opt/freeswitch/scripts altinda dogru yerde ve okunabilir olsa
+         bile bu olur; belirti "script yok" gibi gorunmez, "calistirilamiyor"
+         gibi gorunur. Ilginc bir yan detay: `luarun` (asenkron) `+OK` doner
+         ama script gercekte HIC calismaz — yani basarili gorunen bir cikti
+         yaniltici olabilir. $${script_dir} = /opt/freeswitch/scripts. -->
+    <param name="script-directory" value="$${script_dir}/?.lua"/>
 
     <!--<param name="xml-handler-script" value="/dp.lua"/>-->
     <!--<param name="xml-handler-bindings" value="dialplan"/>-->

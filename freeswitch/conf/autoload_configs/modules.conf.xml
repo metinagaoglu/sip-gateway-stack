@@ -52,6 +52,14 @@
     <load module="mod_commands"/>
     <load module="mod_dptools"/>
     <load module="mod_hash"/>
+    <!-- `limit` uygulamasi BURADAN gelir. mod_hash yalnizca bellek-ici
+         `limit_hash` saglar; kalici/paylasimli sayac icin mod_db gerekir ve
+         sayaclari CORE DB'de (PostgreSQL) `limit_data` tablosunda tutar.
+         mod_db yuklenmezse dialplan'daki `limit ... db ...` satiri
+         "Invalid Application" ile sessizce atlanir ve limit HIC UYGULANMAZ —
+         yani her sey calisiyor gorunur ama es zamanli cagri siniri yoktur.
+         Planda bu yukleme adimi eksikti. -->
+    <load module="mod_db"/>
     <load module="mod_lua"/>
 
     <!-- Dialplan -->

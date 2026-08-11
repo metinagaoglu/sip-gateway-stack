@@ -28,6 +28,22 @@
       </condition>
     </extension>
 
+    <!-- `limit` uygulamasi sinir asildiginda cagriyi transfer hedefine yollar;
+         hedef verilmediginde VARSAYILAN hedef `limit_exceeded` extension'idir.
+         BU EXTENSION ZORUNLU. Tanimli olmadiginda cagri asagidaki `local-user`
+         desenine dusuyordu (`limit_exceeded` harfle basladigi icin eslesiyor),
+         bridge `sofia/internal/limit_exceeded@...` deniyor, Kamailio bulamiyor
+         ve cagri donguye girip `483 Too Many Hops` ile duşuyordu — yani limit
+         "calisiyor" ama arayan anlamsiz bir hata aliyordu.
+         local-user'dan ONCE gelmeli; continue verilmiyor, burada biter. -->
+    <extension name="limit_exceeded">
+      <condition field="destination_number" expression="^limit_exceeded$">
+        <!-- USER_BUSY, arayana 486 Busy Here dondurur: es zamanli cagri
+             siniri icin dogru SIP semantigi budur. -->
+        <action application="hangup" data="USER_BUSY"/>
+      </condition>
+    </extension>
+
     <!-- Kullanicidan kullaniciya: FreeSWITCH kayitlari bilmedigi icin
          cagri Kamailio'ya geri gonderilir (profil outbound-proxy'si),
          Kamailio lookup("location") ile aboneye ulastirir. -->
@@ -46,6 +62,17 @@
       <condition field="destination_number" expression="^([a-zA-Z][a-zA-Z0-9_.-]{1,31}|\d{2,7})$">
         <action application="set" data="call_timeout=30"/>
         <action application="set" data="hangup_after_bridge=true"/>
+
+        <!-- Es zamanli cagri siniri. Deger PostgreSQL'den (subscriber.max_calls)
+             Lua ile okunur; mod_pgsql dialplan uygulamasi saglamaz.
+             ${sip_from_host} KULLANILIYOR, ${domain_name} DEGIL: bu yiginda
+             kimlik dogrulamasi Kamailio'da yapildigi icin `domain_name` HIC
+             set edilmez ve FreeSWITCH yerine konteyner IP'sini koyar (ayni
+             tuzak bridge hedefinde de yasandi, yukaridaki aciklamaya bakin).
+             `db` arka ucu sayaci CORE DB'de (PostgreSQL, limit_data) tutar;
+             mod_db yuklu olmazsa bu satir sessizce atlanir. -->
+        <action application="lua" data="max_calls.lua ${sip_from_user} ${sip_from_host}"/>
+        <action application="limit" data="db user_calls ${sip_from_user} ${user_max_calls}"/>
         <!-- NEDEN ${domain_name} DEGIL: `domain_name` kanal degiskeni ancak
              cagiran taraf FreeSWITCH directory'sinden dogrulandiginda set
              edilir. Bu yiginda kimlik dogrulamasi Kamailio'da yapiliyor

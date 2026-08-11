@@ -73,6 +73,9 @@ services:
     cap_add:
       - SYS_NICE          # SCHED_FIFO / nice hatasinin giderilmesi
     environment:
+      # max_calls.lua bu ikisini okur (freeswitch.Dbh DSN'i).
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
       EXTERNAL_IP: ${EXTERNAL_IP}
       SIP_DOMAIN: ${SIP_DOMAIN}
       RTP_START: ${RTP_START}
@@ -95,7 +98,12 @@ services:
       - ./freeswitch/conf/sip_profiles:/opt/freeswitch/etc/freeswitch/sip_profiles
       # Sablon icermeyen dizinler salt okunur.
       - ./freeswitch/conf/dialplan:/opt/freeswitch/etc/freeswitch/dialplan:ro
-      - ./freeswitch/scripts:/opt/freeswitch/scripts:ro
+      # Yol FreeSWITCH'in $${script_dir} degeriyle AYNI OLMALI. Bu derlemede
+      # script_dir = /opt/freeswitch/share/freeswitch/scripts'tir;
+      # /opt/freeswitch/scripts'e baglamak sessizce ise yaramaz — dosya
+      # konteynerde gorunur ama `lua <script>` "Cannot execute script" der.
+      # Dogrulama: fs_cli -x "global_getvar script_dir"
+      - ./freeswitch/scripts:/opt/freeswitch/share/freeswitch/scripts:ro
     ports:
       # ext-sip-port ile AYNI deger olmali (internal.xml.tmpl).
       # Ayri duserlerse FreeSWITCH ulasilamaz bir Contact duyurur ve
