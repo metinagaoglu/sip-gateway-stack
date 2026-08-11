@@ -1,4 +1,28 @@
 <configuration name="cdr_pg_csv.conf" description="PostgreSQL CDR Logger">
+  <!-- DIKKAT — BU DOSYA HENUZ CALISIR DURUMDA DEGIL (Task 10 tamamlayacak).
+       modules.conf.xml'de mod_cdr_pg_csv bu yuzden yuklenmiyor; aciklamasi
+       orada. Bu haliyle modul yuklenirse FreeSWITCH her cagri sonunda
+       SIGSEGV veriyor (gdb backtrace: my_on_reporting, mod_cdr_pg_csv.c:356,
+       cdr_field = 0x8).
+
+       Task 10'da DUZELTILMESI GEREKENLER:
+       1. <schema> BLOGU EKSIK. mod_cdr_pg_csv, hangi kanal degiskeninin
+          hangi kolona yazilacagini bu blokla ogrenir. Bloksuz alan listesi
+          olusmaz ve modul cop pointer dereference eder — cokmenin dogrudan
+          sebebi budur.
+       2. `${dsn(kamailio)}` GECERSIZ. FreeSWITCH'te `${x}` kanal degiskeni,
+          `$${x}` global degiskendir; `dsn(...)` diye bir fonksiyon yoktur.
+          Bu deger hic cozulmez. Gecerli bir libpq baglanti dizesi
+          (`host=... dbname=... user=... password=...`) gerekir; switch.conf
+          icindeki core-db-dsn ile ayni deseni izleyin (bkz. Task 6).
+       3. Asagidaki parametrelerin mod_cdr_pg_csv'de GERCEKTEN var oldugu
+          dogrulanmali. `table`, `log-b-leg`, `filter-zerobillsec`,
+          `write-cdr-on-exit` bu modulun belgelenmis parametreleri arasinda
+          gorunmuyor — sessizce yok sayilan parametreler "yapilandirdim"
+          yanilgisi yaratir. Modulun kendi kaynagindan/dokumanindan
+          dogrulanmali.
+       4. Yuklendikten sonra verify-08 adim 9 (ACK'siz cagri sonrasi
+          FreeSWITCH hala ayakta mi) MUTLAKA yesil kalmali. -->
   <settings>
 
     <!-- Mevcut pgsql bağlantısını kullan -->

@@ -302,6 +302,13 @@ class Probe:
             return 1
 
         to_hdr = re.search(r"^To:\s*(.+)$", txt, re.I | re.M).group(1).strip()
+        if a.abandon:
+            # TESHIS MODU: 200 OK'e ACK GONDERMEDEN cikiyoruz. Bu, FreeSWITCH
+            # tarafinda cagrinin zaman asimiyla anormal sonlandirilmasini
+            # tetikler ve SIGSEGV suphesini deterministik olarak sinar.
+            # Uretimde ASLA kullanilmaz; sadece scripts/repro-segv.sh icin.
+            self.log("  4) ACK GONDERILMIYOR (--abandon) — cagri terk edildi")
+            return 0
         self.log("  4) ACK (200 OK icin)")
         self.s.send(self.ack(2, self.branch(), to_hdr, True).encode())
 
@@ -375,6 +382,8 @@ def main():
                    help="SDP'de duyurulmasi beklenen medya adresi "
                         "(genelde EXTERNAL_IP)")
     p.add_argument("--rtp-packets", type=int, default=50)
+    p.add_argument("--abandon", action="store_true",
+                   help="TESHIS: 200 OK'e ACK gondermeden cik (SIGSEGV repro)")
     p.add_argument("--rtp-settle", type=float, default=0.8,
                    help="RTP gondermeden once beklenecek sure; dialplan\n"
                         "9999 answer sonrasi sleep(500) yapiyor")

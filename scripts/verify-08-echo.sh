@@ -147,7 +147,36 @@ echo "--- 8. Cagri sonrasi FreeSWITCH ayakta mi (SIGSEGV regresyonu) ---"
 $FSCLI "status" >/dev/null 2>&1 \
   || fail "FreeSWITCH cagri sonrasi ESL'e yanit vermiyor (cokup yeniden basladi olabilir)"
 
-echo "OK: verify-08-echo (sinyalizasyon + ACL + canli konfigurasyon + dialplan + GERCEK cagri)"
+echo "--- 9. YARIM KALAN cagri FreeSWITCH'i cokertmemeli (SIGSEGV regresyonu) ---"
+# Bu adim, uzun sure "FreeSWITCH rastgele cokuyor" olarak gorulen ve once
+# mod_loopback'e, sonra ACK'siz istemcilere atfedilen hatanin regresyon
+# testidir. Gercek sebep gdb ile bulundu: mod_cdr_pg_csv, zorunlu <schema>
+# blogu olmadan yuklendiginde CS_REPORTING asamasinda cop bir pointer'i
+# dereference edip sureci SIGSEGV ile oldururyordu
+# (my_on_reporting, mod_cdr_pg_csv.c:356, cdr_field = 0x8).
+# Task 10 CDR'i geri eklerken bu adim yesil kalmali — kalmazsa schema
+# eksik/yanlis demektir.
+#
+# `--abandon` 200 OK'e ACK gondermeden cikar; FreeSWITCH cagriyi kendi
+# zaman asimiyla anormal sekilde sonlandirir ve CS_REPORTING'e girer.
+RC_BEFORE=$(docker inspect voip-freeswitch --format '{{.RestartCount}}')
+python3 tools/sip-call-probe.py \
+  --proxy "${EXTERNAL_IP}:5060" --domain "tenant1.voip.local" \
+  --user alice --password alice123 --dest 9999 --abandon >/dev/null 2>&1 || true
+# Zaman asimi ~32 sn; cokme olursa erken yakalanir.
+for i in $(seq 1 45); do
+  RC_NOW=$(docker inspect voip-freeswitch --format '{{.RestartCount}}')
+  [ "$RC_NOW" != "$RC_BEFORE" ] && break
+  sleep 1
+done
+RC_AFTER=$(docker inspect voip-freeswitch --format '{{.RestartCount}}')
+[ "$RC_AFTER" = "$RC_BEFORE" ] \
+  || fail "FreeSWITCH yarim kalan cagriyi sonlandirirken COKTU (RestartCount $RC_BEFORE -> $RC_AFTER) — mod_cdr_pg_csv <schema> olmadan mi yuklu?"
+$FSCLI "status" >/dev/null 2>&1 \
+  || fail "FreeSWITCH yarim kalan cagri sonrasi ESL'e yanit vermiyor"
+echo "  FreeSWITCH sag kaldi (RestartCount $RC_AFTER)"
+
+echo "OK: verify-08-echo (sinyalizasyon + ACL + canli konfigurasyon + dialplan + GERCEK cagri + SIGSEGV regresyonu)"
 echo "NOT: Bu script asagidakileri kanitlar:"
 echo "     - internal profili ayakta ve dogru ext-rtp-ip/ext-sip-ip duyuruyor,"
 echo "     - auth-calls=false + ACL/outbound-proxy degerleri CANLI konfigurasyonda dogru,"

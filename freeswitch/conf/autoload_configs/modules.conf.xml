@@ -6,7 +6,24 @@
 
     <!-- Event handlers -->
     <load module="mod_event_socket"/>
-    <load module="mod_cdr_pg_csv"/>
+
+    <!-- mod_cdr_pg_csv KASITLI OLARAK YUKLENMIYOR — Task 10'da geri gelecek.
+         SEBEP (gdb ile kanitlandi, tahmin degil): modul yuklu ama
+         cdr_pg_csv.conf.xml'de zorunlu <schema> blogu YOK ve db-info degeri
+         gecersiz (`${dsn(kamailio)}` diye bir FreeSWITCH ifadesi yok). Alan
+         listesi olusmadigi icin modul her cagri sonunda CS_REPORTING
+         asamasinda cop bir pointer'i dereference ediyor ve SURECI
+         SIGSEGV ile cokertiyor:
+             #0 my_on_reporting (mod_cdr_pg_csv.c:356)   [cdr_field = 0x8]
+             #1 switch_core_session_reporting_state (switch_core_state_machine.c:932)
+         Belirti "FreeSWITCH rastgele cokuyor" (exitCode 139) seklindeydi ve
+         once mod_loopback'e, sonra ACK'siz istemcilere atfedildi; ikisi de
+         yanlisti — tetikleyici bu moduldur. Yarim kalan cagrilarda daha sik
+         tetiklenmesi verinin hangi alanlari doldurduguna bagli, yani duzgun
+         cagrilar da risk altindaydi.
+         Task 10 bu moduu geri eklerken GERCEK bir <schema> blogu ve gecerli
+         bir db-info yazmali; regresyonu verify-08 adim 9 yakalar. -->
+    <!-- <load module="mod_cdr_pg_csv"/> -->
 
     <!-- Database -->
     <load module="mod_pgsql"/>
