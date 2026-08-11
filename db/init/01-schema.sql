@@ -240,6 +240,14 @@ CREATE TABLE IF NOT EXISTS cdr (
     answer_stamp TIMESTAMP,
     end_stamp TIMESTAMP,
 
+    -- mod_cdr_pg_csv answer_stamp DEGIL bunu yazar. Sebep: cevaplanmayan bir
+    -- cagrida ${answer_stamp} BOS STRINGdir ve TIMESTAMP kolonuna '' yazilamaz;
+    -- INSERT patlar ve kayit sessizce cdr-pg-csv/*.csv olarak diske duser.
+    -- ${answer_epoch} her zaman sayidir (cevaplanmadiysa 0).
+    -- Okunabilir zaman gerekirse: SELECT to_timestamp(answer_epoch) ... WHERE answer_epoch > 0
+    -- answer_stamp kolonu geriye donuk uyumluluk icin kalir, NULL olur.
+    answer_epoch BIGINT DEFAULT 0,                    -- 0 = cevaplanmadi
+
     -- Duration
     duration INTEGER,                                 -- Total call duration (seconds)
     billsec INTEGER,                                  -- Billable seconds (after answer)

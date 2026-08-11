@@ -11,6 +11,24 @@
     <param name="ext-rtp-ip" value="${EXTERNAL_IP}"/>
     <param name="ext-sip-ip" value="${EXTERNAL_IP}"/>
 
+    <!-- DIKKAT — ext-sip-ip burada bir CAKISMA yaratir ve cozumu Kamailio
+         tarafindadir. FreeSWITCH Contact'a `sip:...@${EXTERNAL_IP}:5060`
+         yazar; ama HOST'ta ${EXTERNAL_IP}:5060 KAMAILIO'ya publish edilmistir
+         (FreeSWITCH host'ta ${FS_SIP_PORT}'ta). Yani Contact, FreeSWITCH'i
+         degil Kamailio'yu gosterir.
+         `ext-sip-port` ile duzeltmek DENENDI, ISE YARAMADI: parametre
+         mod_sofia'da mevcut ama BIND-URL/Contact'i etkilemedi (olculdu),
+         o yuzden yaziLMIYOR — ise yaramayan parametre birakmak
+         "yapilandirdim" yanilgisi yaratir.
+         ext-sip-ip'yi TAMAMEN kaldirmak da cozum degil: kaldirildiginda
+         SDP'deki medya adresi de konteyner IP'sine dusuyor (olculdu) ve ses
+         kesiliyor — ext-rtp-ip tek basina yetmiyor.
+         Bu yuzden dialog ici ACK/BYE'i yerine ulastirma isi Kamailio'da
+         cozuldu: kendi adresine gelen dialog ici istekleri $du ile
+         FreeSWITCH'e yonlendiriyor (bkz. kamailio.cfg, has_totag dali).
+         Regresyon: verify-10 adim 7 (hangup_cause NORMAL_CLEARING olmali,
+         duration 32 olmamali). -->
+
     <!-- ext-rtp-ip/ext-sip-ip'yi ayarlamak TEK BASINA YETMEZ. FreeSWITCH,
          uzak tarafi "yerel ag" sayarsa SDP'de ext-* degerlerini DEGIL
          rtp-ip'yi (yani konteynerin 172.x adresini) duyurur. Varsayilan

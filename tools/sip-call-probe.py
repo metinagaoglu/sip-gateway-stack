@@ -182,31 +182,54 @@ class Probe:
         )
         return m
 
-    def ack(self, cseq, branch, to_hdr, in_dialog):
+    def dialog_targets(self, txt):
+        """2xx yanitindan dialog hedefini cikarir: (Request-URI, Route seti).
+
+        RFC 3261 12.1.2/12.2.1.1: dialog ici bir istegin Request-URI'si uzak
+        tarafin CONTACT'i olmali, Route seti ise Record-Route basliklarinin
+        TERS sirasi. Bu yapilmazsa Kamailio'da `loose_route()` basarisiz olur;
+        cfg'deki dala gore ACK SESSIZCE ATILIR ve BYE "404 Not Here" alir.
+        Belirti cok sinsiydi: FreeSWITCH ACK gelmedigi icin 200 OK'i
+        retransmit ediyor, probe de BYE'dan sonra o retransmit'i yakalayip
+        "BYE'a 200 OK geldi" saniyordu. Cagri gercekte hic kapanmiyor, 32 sn
+        sonra zaman asimiyla dusuyordu (CDR'da duration=32,
+        hangup_cause=NORMAL_UNSPECIFIED olarak yakalandi).
+        """
+        c = re.search(r"^Contact:\s*<([^>]+)>", txt, re.I | re.M)
+        ruri = c.group(1) if c else self.ruri
+        rr = [v.strip() for v in
+              re.findall(r"^Record-Route:\s*(.+)$", txt, re.I | re.M)]
+        return ruri, list(reversed(rr))
+
+    def ack(self, cseq, branch, to_hdr, ruri=None, routes=None):
         # 2xx'e ACK yeni bir transaction'dir (yeni branch); 407'ye ACK ise
         # ayni branch'i kullanmak ZORUNDADIR, yoksa proxy 407'yi retransmit eder.
-        return (
-            f"ACK {self.ruri} SIP/2.0\r\n"
+        m = (
+            f"ACK {ruri or self.ruri} SIP/2.0\r\n"
             f"Via: SIP/2.0/UDP {self.lip}:{self.lport};branch={branch};rport\r\n"
             f"Max-Forwards: 70\r\n"
             f"From: <sip:{self.a.user}@{self.a.domain}>;tag={self.tag}\r\n"
             f"To: {to_hdr}\r\n"
             f"Call-ID: {self.cid}\r\n"
             f"CSeq: {cseq} ACK\r\n"
-            "Content-Length: 0\r\n\r\n"
         )
+        for r in (routes or []):
+            m += f"Route: {r}\r\n"
+        return m + "Content-Length: 0\r\n\r\n"
 
-    def bye(self, cseq, to_hdr):
-        return (
-            f"BYE {self.ruri} SIP/2.0\r\n"
+    def bye(self, cseq, to_hdr, ruri=None, routes=None):
+        m = (
+            f"BYE {ruri or self.ruri} SIP/2.0\r\n"
             f"Via: SIP/2.0/UDP {self.lip}:{self.lport};branch={self.branch()};rport\r\n"
             f"Max-Forwards: 70\r\n"
             f"From: <sip:{self.a.user}@{self.a.domain}>;tag={self.tag}\r\n"
             f"To: {to_hdr}\r\n"
             f"Call-ID: {self.cid}\r\n"
             f"CSeq: {cseq} BYE\r\n"
-            "Content-Length: 0\r\n\r\n"
         )
+        for r in (routes or []):
+            m += f"Route: {r}\r\n"
+        return m + "Content-Length: 0\r\n\r\n"
 
     def recv_until(self, want, timeout):
         """Bu Call-ID'ye ait, kodu `want` regex'iyle eslesen ilk yaniti dondurur."""
@@ -263,7 +286,7 @@ class Probe:
 
         # 407 ACK'lenmezse proxy yaniti retransmit eder ve iz kirlenir.
         self.log("  2) ACK (407 icin, ayni branch)")
-        self.s.send(self.ack(1, b1, to_hdr, False).encode())
+        self.s.send(self.ack(1, b1, to_hdr).encode())
 
         # 2) Digest ile INVITE -> 200 OK bekleniyor
         auth = digest_response(a.user, a.password, realm, nonce, "INVITE",
@@ -309,8 +332,13 @@ class Probe:
             # Uretimde ASLA kullanilmaz; sadece scripts/repro-segv.sh icin.
             self.log("  4) ACK GONDERILMIYOR (--abandon) — cagri terk edildi")
             return 0
-        self.log("  4) ACK (200 OK icin)")
-        self.s.send(self.ack(2, self.branch(), to_hdr, True).encode())
+        d_ruri, d_routes = self.dialog_targets(txt)
+        self.log(f"  4) ACK (200 OK icin) -> {d_ruri}"
+                 + (f" via {len(d_routes)} Route" if d_routes else ""))
+        _ackmsg = self.ack(2, self.branch(), to_hdr, d_ruri, d_routes)
+        if a.verbose:
+            self.log("  --- GONDERILEN ACK ---\n" + _ackmsg)
+        self.s.send(_ackmsg.encode())
 
         # --- Medya: SDP'de duyurulan adres/port ---
         media_ip, media_port = parse_sdp_media(txt)
@@ -359,7 +387,7 @@ class Probe:
         # 3) BYE ile kapat. Bu adim ayni zamanda "cagri sonlandirmada
         #    FreeSWITCH cokuyor mu" suphesini de sinar.
         self.log("  6) BYE")
-        self.s.send(self.bye(3, to_hdr).encode())
+        self.s.send(self.bye(3, to_hdr, d_ruri, d_routes).encode())
         code, _ = self.recv_until(r"2\d\d", 5)
         if code is None or not code.startswith("2"):
             self.log(f"FAIL: BYE'a 200 OK gelmedi (gelen: {code})")
@@ -382,6 +410,7 @@ def main():
                    help="SDP'de duyurulmasi beklenen medya adresi "
                         "(genelde EXTERNAL_IP)")
     p.add_argument("--rtp-packets", type=int, default=50)
+    p.add_argument("--verbose", action="store_true")
     p.add_argument("--abandon", action="store_true",
                    help="TESHIS: 200 OK'e ACK gondermeden cik (SIGSEGV repro)")
     p.add_argument("--rtp-settle", type=float, default=0.8,

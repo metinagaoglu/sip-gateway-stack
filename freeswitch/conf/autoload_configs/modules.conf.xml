@@ -21,9 +21,12 @@
          yanlisti — tetikleyici bu moduldur. Yarim kalan cagrilarda daha sik
          tetiklenmesi verinin hangi alanlari doldurduguna bagli, yani duzgun
          cagrilar da risk altindaydi.
-         Task 10 bu moduu geri eklerken GERCEK bir <schema> blogu ve gecerli
-         bir db-info yazmali; regresyonu verify-08 adim 9 yakalar. -->
-    <!-- <load module="mod_cdr_pg_csv"/> -->
+         Task 10 bu modulu GERCEK bir <schema> blogu ve gecerli bir db-info
+         ile geri ekledi (cdr_pg_csv.conf.xml.tmpl). Regresyonu iki yerde
+         korunuyor: verify-08 adim 9 (yarim kalan cagri surecı cokertmemeli)
+         ve verify-10 adim 3/5 (schema canli konfigurasyonda var + CDR
+         yazarken surec sag kaliyor). -->
+    <load module="mod_cdr_pg_csv"/>
 
     <!-- Database -->
     <load module="mod_pgsql"/>

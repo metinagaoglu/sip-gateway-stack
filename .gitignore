@@ -14,6 +14,7 @@ freeswitch/conf/autoload_configs/db.conf.xml
 # mekanizmasindan geciyor; tutarlilik icin ayni sekilde yok sayiliyor.
 freeswitch/conf/autoload_configs/xml_curl.conf.xml
 freeswitch/conf/autoload_configs/acl.conf.xml
+freeswitch/conf/autoload_configs/cdr_pg_csv.conf.xml
 
 # internal.xml.tmpl'den render edilir (Task 8); ayni bind-mount/render
 # mekanizmasi (sip_profiles de yazilabilir bagli).
