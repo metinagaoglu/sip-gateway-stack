@@ -6,7 +6,7 @@ CONF=/opt/freeswitch/etc/freeswitch
 # *.tmpl sablonlarini ortam degiskenleriyle doldur.
 # Yalnizca acikca listelenen degiskenler degistirilir; FreeSWITCH'in kendi
 # $${...} sozdizimi bozulmasin diye envsubst'a beyaz liste veriliyor.
-VARS='${EXTERNAL_IP} ${SIP_DOMAIN} ${FS_SIP_PORT} ${FS_EXT_SIP_PORT} ${RTP_START} ${RTP_END} ${FS_ESL_PASSWORD} ${POSTGRES_USER} ${POSTGRES_PASSWORD} ${POSTGRES_DB} ${FS_DB_NAME} ${TRUNK_NAME} ${TRUNK_HOST} ${TRUNK_USER} ${TRUNK_PASS} ${TRUNK_REGISTER} ${TRUNK_DID}'
+VARS='${EXTERNAL_IP} ${SIP_DOMAIN} ${CODEC_PREFS} ${FS_SIP_PORT} ${FS_EXT_SIP_PORT} ${RTP_START} ${RTP_END} ${FS_ESL_PASSWORD} ${POSTGRES_USER} ${POSTGRES_PASSWORD} ${POSTGRES_DB} ${FS_DB_NAME} ${TRUNK_NAME} ${TRUNK_HOST} ${TRUNK_USER} ${TRUNK_PASS} ${TRUNK_REGISTER} ${TRUNK_DID}'
 
 find "$CONF" -name '*.tmpl' | while read -r tmpl; do
     out="${tmpl%.tmpl}"

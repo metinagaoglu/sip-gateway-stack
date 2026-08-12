@@ -176,7 +176,19 @@ $FSCLI "status" >/dev/null 2>&1 \
   || fail "FreeSWITCH yarim kalan cagri sonrasi ESL'e yanit vermiyor"
 echo "  FreeSWITCH sag kaldi (RestartCount $RC_AFTER)"
 
-echo "OK: verify-08-echo (sinyalizasyon + ACL + canli konfigurasyon + dialplan + GERCEK cagri + SIGSEGV regresyonu)"
+echo "--- 10. codec tercihleri CANLI profilde gercekten uygulanmis mi ---"
+# Dosyada dogru yazmasi YETMEZ. Onceden bu degerler `$${global_codec_prefs}`
+# global degiskeninden okunuyordu; autoload_configs alfabetik yuklendigi icin
+# sofia.conf switch.conf'tan ONCE okunuyor ve degisken henuz tanimsiz oluyor.
+# Sonuc: profil sessizce VANILLA varsayilanini (OPUS,G722,PCMU,PCMA,H264,VP8)
+# kullaniyordu — istenen liste degil, ustelik video codec'leri dahil.
+# Artik deger .env'den (${CODEC_PREFS}) sablona GOMULUYOR, sira bagimsiz.
+CODECS=$($FSCLI "sofia status profile internal" | grep -E "^CODECS IN" | head -1 | awk '{print $3}')
+[ "$CODECS" = "${CODEC_PREFS}" ] \
+  || fail "internal profil canli CODECS IN degeri '${CODECS}' ama beklenen '${CODEC_PREFS}' — codec tercihleri uygulanmiyor (global degisken sira sorunu geri mi geldi?)"
+echo "  canli codec listesi: $CODECS"
+
+echo "OK: verify-08-echo (sinyalizasyon + ACL + canli konfigurasyon + dialplan + GERCEK cagri + SIGSEGV + codec regresyonu)"
 echo "NOT: Bu script asagidakileri kanitlar:"
 echo "     - internal profili ayakta ve dogru ext-rtp-ip/ext-sip-ip duyuruyor,"
 echo "     - auth-calls=false + ACL/outbound-proxy degerleri CANLI konfigurasyonda dogru,"

@@ -76,6 +76,7 @@ services:
       # max_calls.lua bu ikisini okur (freeswitch.Dbh DSN'i).
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
+      CODEC_PREFS: ${CODEC_PREFS}
       FS_EXT_SIP_PORT: ${FS_EXT_SIP_PORT}
       TRUNK_ENABLED: ${TRUNK_ENABLED}
       EXTERNAL_IP: ${EXTERNAL_IP}
