@@ -18,4 +18,7 @@ freeswitch/conf/autoload_configs/cdr_pg_csv.conf.xml
 
 # internal.xml.tmpl'den render edilir (Task 8); ayni bind-mount/render
 # mekanizmasi (sip_profiles de yazilabilir bagli).
+freeswitch/conf/dialplan/default.xml
 freeswitch/conf/sip_profiles/internal.xml
+freeswitch/conf/sip_profiles/external/trunk.xml
+freeswitch/conf/sip_profiles/external.xml

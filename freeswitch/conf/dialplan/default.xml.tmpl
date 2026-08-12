@@ -89,5 +89,29 @@
       </condition>
     </extension>
 
+    <!-- Dis numara -> SIP trunk. local-user'dan SONRA gelmeli: kisa dahili
+         numaralar ve kullanici adlari once yerel kurallara dusmeli.
+         Desen kasitli olarak DAR:
+           +905551234567   E.164
+           00905551234567  uluslararasi prefiks
+           5551234567      10-15 hane
+         9999/9998 (servis kodlari), `bob` (kullanici adi) ve 1001 gibi kisa
+         dahililer bu desene UYMAZ — verify-12 adim 4 bunlari tek tek sinar.
+         Gateway adi bu dosya bir SABLON (.tmpl) oldugu icin entrypoint'te
+         envsubst ile GOMULUR. Onceki yaklasim `$${trunk_name}` global
+         degiskeniydi ve BASLANGIC SIRASINA baglıydi: FreeSWITCH ilk acilista
+         dialplan'i switch.conf'taki <variables> blogundan ONCE okuyor, deger
+         bos cozuluyor ve hedef `sofia/gateway//<numara>` oluyordu. `reloadxml`
+         sonrasi duzeliyordu — yani her yeniden baslatmadan sonra giden
+         cagrilar SESSIZCE bozuk kaliyordu. Sablonla bu bagimlilik tamamen
+         ortadan kalkti. (Ayni sinif sira sorunu Task 6'da codec tercihlerinde
+         de yasanmisti.) -->
+    <extension name="trunk-out">
+      <condition field="destination_number" expression="^(\+?\d{10,15}|00\d+)$">
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="bridge" data="sofia/gateway/${TRUNK_NAME}/$1"/>
+      </condition>
+    </extension>
+
   </context>
 </include>

@@ -1,8 +1,0 @@
-<include>
-  <gateway name="kamailio">
-    <param name="username" value="fsnode"/>
-    <param name="password" value="fsnodepass"/>
-    <param name="proxy" value="kamailio"/>
-    <param name="register" value="false"/>
-  </gateway>
-</include>

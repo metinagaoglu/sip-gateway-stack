@@ -1,0 +1,36 @@
+<include>
+  <!-- Saglayicidan BAGIMSIZ trunk tanimi: yalnizca .env degisir.
+       Iki calisma modu var ve ikisi de bu tek sablonla karsilanir:
+
+         REGISTER modu (orn. Telnyx Credential Connection):
+           TRUNK_REGISTER=true, TRUNK_USER/TRUNK_PASS dolu.
+           FreeSWITCH saglayiciya kayit olur; gateway durumu REGED olmali.
+
+         IP YETKILENDIRME modu (orn. Twilio Elastic SIP Trunk):
+           TRUNK_REGISTER=false. Saglayici tarafinda bu sunucunun genel
+           IP'sine izin verilir; gateway durumu NOREG/UP olmali.
+           Bu modda TRUNK_USER/TRUNK_PASS bos birakilabilir.
+
+       TRUNK_ENABLED=false iken entrypoint.sh uretilmis trunk.xml'i SILER.
+       Aksi halde bos TRUNK_HOST ile gecersiz bir gateway olusur ve
+       FreeSWITCH sonsuz basarisiz REGISTER denemesi yapip loglari kirletir —
+       ustelik `sofia status gateway` cikti verdigi icin "trunk tanimli" gibi
+       gorunur. verify-12 kapali modda gateway'in GERCEKTEN yok oldugunu
+       kontrol eder. -->
+  <gateway name="${TRUNK_NAME}">
+    <param name="realm" value="${TRUNK_HOST}"/>
+    <param name="proxy" value="${TRUNK_HOST}"/>
+    <param name="username" value="${TRUNK_USER}"/>
+    <param name="password" value="${TRUNK_PASS}"/>
+    <param name="register" value="${TRUNK_REGISTER}"/>
+    <param name="register-transport" value="udp"/>
+    <param name="expire-seconds" value="600"/>
+    <param name="retry-seconds" value="30"/>
+    <!-- Arayan numarasi From basliginda tasinsin: saglayicilarin cogu
+         cikan cagrida From'daki numarayi CLI olarak kullanir. -->
+    <param name="caller-id-in-from" value="true"/>
+    <!-- OPTIONS ping: gateway'in olu/diri durumu boylece gercek olcume
+         dayanir, varsayime degil. -->
+    <param name="ping" value="30"/>
+  </gateway>
+</include>

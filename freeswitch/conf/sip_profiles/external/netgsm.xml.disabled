@@ -1,0 +1,15 @@
+<!-- DEVRE DISI (uzanti .disabled). Bu dosya external profilinin
+     `<X-PRE-PROCESS cmd="include" data="external/*.xml"/>` deseni tarafindan
+     TOPLANIYORDU ve `kamailio` adinda eski bir gateway olusturuyordu.
+     Yeni trunk tanimi saglayicidan bagimsizdir ve .env ile surulur:
+     external/trunk.xml.tmpl. Iceri aktarilmasin diye adi degistirildi;
+     icerik referans olsun diye korundu. Geri almak icin .disabled ekini
+     kaldirmak yeterli. -->
+<include>
+  <gateway name="kamailio">
+    <param name="username" value="fsnode"/>
+    <param name="password" value="fsnodepass"/>
+    <param name="proxy" value="kamailio"/>
+    <param name="register" value="false"/>
+  </gateway>
+</include>

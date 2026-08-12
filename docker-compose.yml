@@ -76,6 +76,8 @@ services:
       # max_calls.lua bu ikisini okur (freeswitch.Dbh DSN'i).
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
+      FS_EXT_SIP_PORT: ${FS_EXT_SIP_PORT}
+      TRUNK_ENABLED: ${TRUNK_ENABLED}
       EXTERNAL_IP: ${EXTERNAL_IP}
       SIP_DOMAIN: ${SIP_DOMAIN}
       RTP_START: ${RTP_START}
@@ -96,8 +98,9 @@ services:
       # *.tmpl sablonlarini bu dizinlere isleyip yaziyor.
       - ./freeswitch/conf/autoload_configs:/opt/freeswitch/etc/freeswitch/autoload_configs
       - ./freeswitch/conf/sip_profiles:/opt/freeswitch/etc/freeswitch/sip_profiles
-      # Sablon icermeyen dizinler salt okunur.
-      - ./freeswitch/conf/dialplan:/opt/freeswitch/etc/freeswitch/dialplan:ro
+      # YAZILABILIR: default.xml.tmpl entrypoint'te islenip default.xml
+      # olarak buraya yaziliyor (gateway adi .env'den gomuluyor).
+      - ./freeswitch/conf/dialplan:/opt/freeswitch/etc/freeswitch/dialplan
       # Yol FreeSWITCH'in $${script_dir} degeriyle AYNI OLMALI. Bu derlemede
       # script_dir = /opt/freeswitch/share/freeswitch/scripts'tir;
       # /opt/freeswitch/scripts'e baglamak sessizce ise yaramaz — dosya
@@ -109,6 +112,11 @@ services:
       # Ayri duserlerse FreeSWITCH ulasilamaz bir Contact duyurur ve
       # dialog ici ACK/BYE kaybolur.
       - "${FS_SIP_PORT}:5060/udp"
+      # external (trunk) profili. Host portu = KONTEYNER portu olmak ZORUNDA:
+      # FreeSWITCH Contact/Via'ya profil portunu yazar ve `ext-sip-port` bu
+      # derlemede Contact'i etkilemiyor (internal profilde olculdu). Portlar
+      # ayri duserse saglayici geri donen istekleri yanlis yere gonderir.
+      - "${FS_EXT_SIP_PORT}:${FS_EXT_SIP_PORT}/udp"
       - "8021:8021/tcp"
       - "${RTP_START}-${RTP_END}:${RTP_START}-${RTP_END}/udp"
     depends_on:
