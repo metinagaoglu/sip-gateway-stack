@@ -39,6 +39,11 @@ services:
       # yeniden olusturmada kaybolur; bu satir compose'un parcasi oldugu icin
       # kalicidir.
       - "tenant1.voip.local:127.0.0.1"
+      # 'freeswitch' adini Docker DNS'ine BIRAKMIYORUZ: dispatcher yuklemesi
+      # baslangicta cozumleme yapar ve FreeSWITCH henuz ayakta degilse hedefi
+      # sessizce atlar. /etc/hosts girdisi konteyner ayaga kalkarken hazirdir,
+      # yani baslatma sirasi onemsizlesir. Regresyon: verify-94-startup-order.sh
+      - "freeswitch:${FS_CONTAINER_IP}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -125,7 +130,15 @@ services:
         condition: service_healthy
       xmlapi:
         condition: service_healthy
-    networks: [voip_net]
+    networks:
+      voip_net:
+        # SABIT IP. Kamailio'nun dispatcher hedefi bir hostname ve Kamailio
+        # dispatcher'i BASLANGICTA cozmeye calisir; DNS o an hazir degilse
+        # hedefi TAMAMEN ATLAR ve bir daha denemez (flags=8 probing bile
+        # kurtarmiyor -- olculdu). Sonuc butun cagrilarda kalici 503 olur.
+        # Sabit IP + kamailio'da extra_hosts esleme, DNS bagimliligini ve
+        # dolayisiyla baslatma sirasi hassasiyetini tamamen ortadan kaldirir.
+        ipv4_address: ${FS_CONTAINER_IP}
 
 volumes:
   voip_pg_data:

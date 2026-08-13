@@ -136,6 +136,25 @@ FreeSWITCH directory'sinde degil). Dialplan'da `${sip_from_host}` kullanin.
 **`mod_cdr_pg_csv` `<schema>` blogu olmadan yuklenmemeli** — alan listesi
 olusmaz ve surec her cagri sonunda SIGSEGV verir.
 
+**`git checkout` ile branch degistirdikten sonra kapsayicilari yenileyin.**
+Checkout, bind-mount edilen dizinleri silip yeniden olusturabilir; kapsayici
+eski inode'u tuttugu icin mount KOPAR ve dosyalar konteynerde kaybolur
+(`No such file or directory`) — host'ta dururken. Cozum:
+
+```bash
+docker compose up -d --force-recreate
+```
+
+**Kamailio, FreeSWITCH'ten once baslayabilir ve bu NORMAL'dir.** compose'da
+kamailio'nun freeswitch'e `depends_on`'u yok (karsilikli bagimlilik olurdu).
+Dispatcher hedefi baslangicta cozumleme yaptigi icin bu durum eskiden butun
+cagrilari kalici olarak 503 yapiyordu. Iki onlem birlikte gerekiyor:
+`extra_hosts` ile `freeswitch` adinin sabit IP'ye eslenmesi VE
+`use_dns_cache=0` (Kamailio kendi DNS onbellegini kullanirken `/etc/hosts`'u
+ATLAR — konteyner icinde `getent hosts freeswitch` dogru sonuc verirken
+Kamailio ayni adi cozemiyordu). `verify-94-startup-order.sh` bunu FreeSWITCH'i
+durdurup Kamailio'yu yeniden baslatarak sinar.
+
 **Sema degisikliklerini `db/init/` scriptlerine yazin.** Bu scriptler yalnizca
 BOS bir veri dizininde calisir; calisan veritabanina elle `ALTER TABLE`
 uygulamak yeterli degildir. `verify-92-fresh-schema.sh` init scriptlerini
