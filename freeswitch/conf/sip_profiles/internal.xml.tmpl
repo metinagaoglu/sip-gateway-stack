@@ -1,0 +1,72 @@
+<profile name="internal">
+  <settings>
+    <param name="sip-port" value="5060"/>
+    <param name="context" value="default"/>
+    <param name="dialplan" value="XML"/>
+    <param name="rtp-ip" value="$${local_ip_v4}"/>
+    <param name="sip-ip" value="$${local_ip_v4}"/>
+
+    <!-- Docker bridge arkasindaki container'in kendi IP'si disaridan
+         erisilemez; SDP'de bu adres duyurulur. Yanlissa ses tek yonlu olur. -->
+    <param name="ext-rtp-ip" value="${EXTERNAL_IP}"/>
+    <param name="ext-sip-ip" value="${EXTERNAL_IP}"/>
+
+    <!-- DIKKAT — ext-sip-ip burada bir CAKISMA yaratir ve cozumu Kamailio
+         tarafindadir. FreeSWITCH Contact'a `sip:...@${EXTERNAL_IP}:5060`
+         yazar; ama HOST'ta ${EXTERNAL_IP}:5060 KAMAILIO'ya publish edilmistir
+         (FreeSWITCH host'ta ${FS_SIP_PORT}'ta). Yani Contact, FreeSWITCH'i
+         degil Kamailio'yu gosterir.
+         `ext-sip-port` ile duzeltmek DENENDI, ISE YARAMADI: parametre
+         mod_sofia'da mevcut ama BIND-URL/Contact'i etkilemedi (olculdu),
+         o yuzden yaziLMIYOR — ise yaramayan parametre birakmak
+         "yapilandirdim" yanilgisi yaratir.
+         ext-sip-ip'yi TAMAMEN kaldirmak da cozum degil: kaldirildiginda
+         SDP'deki medya adresi de konteyner IP'sine dusuyor (olculdu) ve ses
+         kesiliyor — ext-rtp-ip tek basina yetmiyor.
+         Bu yuzden dialog ici ACK/BYE'i yerine ulastirma isi Kamailio'da
+         cozuldu: kendi adresine gelen dialog ici istekleri $du ile
+         FreeSWITCH'e yonlendiriyor (bkz. kamailio.cfg, has_totag dali).
+         Regresyon: verify-10 adim 7 (hangup_cause NORMAL_CLEARING olmali,
+         duration 32 olmamali). -->
+
+    <!-- ext-rtp-ip/ext-sip-ip'yi ayarlamak TEK BASINA YETMEZ. FreeSWITCH,
+         uzak tarafi "yerel ag" sayarsa SDP'de ext-* degerlerini DEGIL
+         rtp-ip'yi (yani konteynerin 172.x adresini) duyurur. Varsayilan
+         local-network-acl=localnet.auto butun RFC1918 aralklarini yerel
+         sayar; sinyalizasyon Kamailio'dan (172.30.0.x) geldigi icin uzak
+         taraf yerel gorunur ve ext-rtp-ip hic devreye girmez.
+         Belirti: cagri kuruluyor, 200 OK geliyor, dialplan/echo calisiyor,
+         ama SES YOK — cunku SDP'de c=IN IP4 172.30.0.3 duyurulur ve dis
+         istemci oraya RTP gonderemez.
+         `none` ile hicbir peer yerel sayilmaz, ext-* her zaman kullanilir.
+         Bu dogru secim, cunku bu profilin tek SIP komsusu Kamailio'dur ve
+         medyanin karsi tarafi HER ZAMAN docker agi disindadir.
+         Regresyon testi: verify-08 adim 7 (SDP adresi + gercek RTP echo). -->
+    <param name="local-network-acl" value="none"/>
+
+    <!-- Kimlik dogrulama Kamailio'da; burada ACL ile guven. -->
+    <param name="auth-calls" value="false"/>
+    <param name="apply-inbound-acl" value="trusted"/>
+
+    <!-- FreeSWITCH kayitlari bilmez, Kamailio bilir. Giden tum
+         istekler Kamailio'ya gider; Kamailio lookup("location") yapar. -->
+    <param name="outbound-proxy" value="sip:kamailio:5060"/>
+
+    <param name="aggressive-nat-detection" value="true"/>
+    <param name="apply-nat-acl" value="trusted"/>
+    <!-- Deger ${CODEC_PREFS}'ten GOMULUYOR, `$${global_codec_prefs}`
+         global degiskeninden OKUNMUYOR. Sebep olculdu: autoload_configs
+         alfabetik yuklenir, `sofia.conf.xml` `switch.conf.xml`'den ONCE
+         okunur ve o anda global degisken henuz tanimli degildir. Sonuc:
+         profil, niyet edilen OPUS,PCMU,PCMA yerine VANILLA varsayilanini
+         (OPUS,G722,PCMU,PCMA,H264,VP8) goruyordu — video codec'leri dahil.
+         Konfigurasyon dosyasi dogru gorunuyor ama CANLI deger farkli oluyor.
+         Ayni sinif sira sorunu trunk gateway adinda da yasandi (Task 12).
+         Regresyon: verify-08 adim 10. -->
+    <param name="inbound-codec-prefs" value="${CODEC_PREFS}"/>
+    <param name="outbound-codec-prefs" value="${CODEC_PREFS}"/>
+    <param name="inbound-late-negotiation" value="true"/>
+    <param name="rtp-timeout-sec" value="300"/>
+    <param name="rtp-hold-timeout-sec" value="1800"/>
+  </settings>
+</profile>

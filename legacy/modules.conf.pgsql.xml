@@ -1,0 +1,36 @@
+<configuration name="modules.conf" description="Modules - PostgreSQL Enabled">
+  <modules>
+    <!-- Core -->
+    <load module="mod_console"/>
+    <load module="mod_logfile"/>
+
+    <!-- Databases -->
+    <load module="mod_db"/>
+    <load module="mod_pgsql"/>
+
+    <!-- XML Configuration (PostgreSQL via HTTP) -->
+    <load module="mod_xml_curl"/>
+
+    <!-- Event Socket -->
+    <load module="mod_event_socket"/>
+
+    <!-- SIP -->
+    <load module="mod_sofia"/>
+
+    <!-- Dialplan -->
+    <load module="mod_dialplan_xml"/>
+    <load module="mod_dptools"/>
+
+    <!-- CDR - PostgreSQL -->
+    <load module="mod_cdr_pgsql"/>
+
+    <!-- Codecs -->
+    <load module="mod_g711"/>
+    <load module="mod_opus"/>
+
+    <!-- Applications -->
+    <load module="mod_commands"/>
+    <load module="mod_conference"/>
+    <load module="mod_voicemail"/>
+  </modules>
+</configuration>

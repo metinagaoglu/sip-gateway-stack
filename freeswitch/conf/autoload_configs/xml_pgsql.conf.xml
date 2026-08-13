@@ -1,0 +1,7 @@
+<configuration name="xml_pgsql.conf" description="XML Fetch from PostgreSQL">
+  <settings>
+    <param name="dsn" value="host=dbhost dbname=freeswitch user=dbuser password=dbpass"/>
+    <param name="select-sql" value="SELECT xml FROM dialplan_view WHERE context='$${context}' AND destination_number='$${destination_number}'"/>
+    <param name="directory-select-sql" value="SELECT xml FROM directory_view WHERE user='$${user}' AND domain='$${domain}'"/>
+  </settings>
+</configuration>

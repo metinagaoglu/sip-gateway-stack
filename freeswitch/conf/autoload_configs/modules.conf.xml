@@ -1,32 +1,83 @@
 <configuration name="modules.conf" description="Modules">
   <modules>
-    <!-- Core -->
+    <!-- Loggers -->
     <load module="mod_console"/>
     <load module="mod_logfile"/>
 
-    <!-- Databases -->
-    <load module="mod_db"/>
-    <load module="mod_pgsql"/>
-
-    <!-- Event Socket -->
+    <!-- Event handlers -->
     <load module="mod_event_socket"/>
 
-    <!-- SIP -->
+    <!-- mod_cdr_pg_csv KASITLI OLARAK YUKLENMIYOR — Task 10'da geri gelecek.
+         SEBEP (gdb ile kanitlandi, tahmin degil): modul yuklu ama
+         cdr_pg_csv.conf.xml'de zorunlu <schema> blogu YOK ve db-info degeri
+         gecersiz (`${dsn(kamailio)}` diye bir FreeSWITCH ifadesi yok). Alan
+         listesi olusmadigi icin modul her cagri sonunda CS_REPORTING
+         asamasinda cop bir pointer'i dereference ediyor ve SURECI
+         SIGSEGV ile cokertiyor:
+             #0 my_on_reporting (mod_cdr_pg_csv.c:356)   [cdr_field = 0x8]
+             #1 switch_core_session_reporting_state (switch_core_state_machine.c:932)
+         Belirti "FreeSWITCH rastgele cokuyor" (exitCode 139) seklindeydi ve
+         once mod_loopback'e, sonra ACK'siz istemcilere atfedildi; ikisi de
+         yanlisti — tetikleyici bu moduldur. Yarim kalan cagrilarda daha sik
+         tetiklenmesi verinin hangi alanlari doldurduguna bagli, yani duzgun
+         cagrilar da risk altindaydi.
+         Task 10 bu modulu GERCEK bir <schema> blogu ve gecerli bir db-info
+         ile geri ekledi (cdr_pg_csv.conf.xml.tmpl). Regresyonu iki yerde
+         korunuyor: verify-08 adim 9 (yarim kalan cagri surecı cokertmemeli)
+         ve verify-10 adim 3/5 (schema canli konfigurasyonda var + CDR
+         yazarken surec sag kaliyor). -->
+    <load module="mod_cdr_pg_csv"/>
+
+    <!-- Database -->
+    <load module="mod_pgsql"/>
+
+    <!-- XML interfaces -->
+    <load module="mod_xml_curl"/>
+
+    <!-- Endpoints -->
     <load module="mod_sofia"/>
-
-    <!-- Dialplan -->
-    <load module="mod_dialplan_xml"/>
-    <load module="mod_dptools"/>
-
-    <!-- Codecs -->
-    <load module="mod_g711"/>
-    <load module="mod_opus"/>
+    <!-- mod_loopback BILEREK YUKLENMIYOR: Task 8 sirasinda ampirik olarak
+         dogrulandi ki bu derlemede (FreeSWITCH 1.10.12) bir loopback
+         baglantisinin cift bacagi (bonded pair) NASIL sonlandirilirsa
+         sonlandirilsin — uuid_kill, sched_hangup, hatta dialplan'in kendi
+         sonundaki normal <action application="hangup"/> ile dogal bitis —
+         FreeSWITCH surecini SEGFAULT (exit code 139) ile cokertiyor.
+         Tekrar tekrar (5+ kez) izole edilerek dogrulandi; bkz.
+         task-8-report.md. Bu modul yuklenmeden gercek SIP trafiginde
+         (Kamailio -> internal profil) hicbir islevsellik kaybi olmaz —
+         sadece 'originate loopback/...' tarzi sunucu-tarafi test
+         orijinasyonlari kullanilamaz. -->
 
     <!-- Applications -->
     <load module="mod_commands"/>
-    <load module="mod_conference"/>
-    <load module="mod_voicemail"/>
+    <load module="mod_dptools"/>
+    <load module="mod_hash"/>
+    <!-- `limit` uygulamasi BURADAN gelir. mod_hash yalnizca bellek-ici
+         `limit_hash` saglar; kalici/paylasimli sayac icin mod_db gerekir ve
+         sayaclari CORE DB'de (PostgreSQL) `limit_data` tablosunda tutar.
+         mod_db yuklenmezse dialplan'daki `limit ... db ...` satiri
+         "Invalid Application" ile sessizce atlanir ve limit HIC UYGULANMAZ —
+         yani her sey calisiyor gorunur ama es zamanli cagri siniri yoktur.
+         Planda bu yukleme adimi eksikti. -->
+    <load module="mod_db"/>
+    <load module="mod_lua"/>
 
-    <!-- CDR - Will use mod_pgsql via dialplan -->
+    <!-- Dialplan -->
+    <load module="mod_dialplan_xml"/>
+
+    <!-- Codecs -->
+    <!-- mod_g711 diye ayri bir modul yok: PCMU/PCMA bu derlemede
+         CORE_PCM_MODULE olarak cekirdege gomulu geliyor, yuklemeye
+         calisinca "cannot open shared object file" hatasi veriyordu. -->
+    <load module="mod_opus"/>
+
+    <!-- File formats -->
+    <load module="mod_sndfile"/>
+    <load module="mod_tone_stream"/>
+    <load module="mod_local_stream"/>
+
+    <!-- mod_verto ve mod_signalwire BILEREK yok:
+         build'de devre disi birakildilar, yuklenmeye calisilinca
+         "Error Loading module" uretiyorlardi. -->
   </modules>
 </configuration>

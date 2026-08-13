@@ -1,0 +1,15 @@
+<configuration name="pgsql.conf" description="PGSQL Configuration">
+  <settings>
+    <!-- "kamailio" burada baglanti ADI (identifier) - cdr_pg_csv.conf.xml
+         (${dsn(kamailio)}) ve dialplan/default.xml (pgsql uygulamasi) bu
+         isimle referans veriyor, degistirilmemeli. Kimlik bilgileri
+         .env'den envsubst ile geliyor; hicbir sifre burada duz metin degil. -->
+    <connection name="kamailio">
+      <param name="hostname" value="postgres"/>
+      <param name="hostport" value="5432"/>
+      <param name="username" value="${POSTGRES_USER}"/>
+      <param name="password" value="${POSTGRES_PASSWORD}"/>
+      <param name="dbname" value="${POSTGRES_DB}"/>
+    </connection>
+  </settings>
+</configuration>

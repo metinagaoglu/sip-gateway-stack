@@ -1,0 +1,58 @@
+<profile name="external">
+  <gateways>
+    <!-- Trunk tanimi ayri dosyada: external/trunk.xml (sablondan uretilir).
+         TRUNK_ENABLED=false iken entrypoint.sh o dosyayi SILER, boylece
+         bos TRUNK_HOST ile gecersiz bir gateway olusup sonsuz REGISTER
+         denemesi yapmaz. -->
+    <X-PRE-PROCESS cmd="include" data="external/*.xml"/>
+  </gateways>
+
+  <settings>
+    <!-- Port ${FS_EXT_SIP_PORT}: internal profil konteynerde 5060'ta, bu
+         profil ayri bir portta olmali. KRITIK: docker-compose bu portu
+         HOST'TA AYNI NUMARAYLA yayinlar (${FS_EXT_SIP_PORT}:${FS_EXT_SIP_PORT}).
+         Esitlik zorunlu, cunku FreeSWITCH Contact/Via'ya PROFIL portunu yazar
+         ve `ext-sip-port` bu derlemede Contact'i etkilemiyor (internal
+         profilde olculdu). Portlar ayri duserse saglayici, dialog ici
+         istekleri ve gelen INVITE'lari ulasilamayan bir adrese gonderir. -->
+    <param name="sip-port" value="${FS_EXT_SIP_PORT}"/>
+
+    <!-- Gelen trunk cagrilari `public` baglamina duser (Task 13). Bu ayrim
+         guvenlik icindir: disaridan gelen bir cagri `default` baglamindaki
+         kullanicidan kullaniciya kurallarina ERISEMEMELI. -->
+    <param name="context" value="public"/>
+    <param name="dialplan" value="XML"/>
+
+    <param name="rtp-ip" value="$${local_ip_v4}"/>
+    <param name="sip-ip" value="$${local_ip_v4}"/>
+
+    <!-- Saglayici internetten gelir; hem SIP hem RTP icin dis adres
+         duyurulmali. Internal profilden farkli olarak burada ext-sip-ip
+         DOGRU davranistir: bu profilin karsi tarafi Kamailio degil,
+         disarideki saglayicidir. -->
+    <param name="ext-rtp-ip" value="${EXTERNAL_IP}"/>
+    <param name="ext-sip-ip" value="${EXTERNAL_IP}"/>
+    <!-- internal profildeki ayni gerekce: varsayilan localnet.auto RFC1918'i
+         yerel sayar ve ext-* degerlerini devre disi birakir. -->
+    <param name="local-network-acl" value="none"/>
+
+    <!-- Trunk kimlik dogrulamasi gateway credential'lari (register) ya da
+         saglayici tarafindaki IP izni ile yapilir; gelen INVITE'lara digest
+         sorulmaz. Gelen cagri guvenligi Task 13'te ACL ile saglanir. -->
+    <param name="auth-calls" value="false"/>
+
+    <!-- Deger ${CODEC_PREFS}'ten GOMULUYOR, `$${global_codec_prefs}`
+         global degiskeninden OKUNMUYOR. Sebep olculdu: autoload_configs
+         alfabetik yuklenir, `sofia.conf.xml` `switch.conf.xml`'den ONCE
+         okunur ve o anda global degisken henuz tanimli degildir. Sonuc:
+         profil, niyet edilen OPUS,PCMU,PCMA yerine VANILLA varsayilanini
+         (OPUS,G722,PCMU,PCMA,H264,VP8) goruyordu — video codec'leri dahil.
+         Konfigurasyon dosyasi dogru gorunuyor ama CANLI deger farkli oluyor.
+         Ayni sinif sira sorunu trunk gateway adinda da yasandi (Task 12).
+         Regresyon: verify-08 adim 10. -->
+    <param name="inbound-codec-prefs" value="${CODEC_PREFS}"/>
+    <param name="outbound-codec-prefs" value="${CODEC_PREFS}"/>
+    <param name="rtp-timeout-sec" value="300"/>
+    <param name="rtp-hold-timeout-sec" value="1800"/>
+  </settings>
+</profile>

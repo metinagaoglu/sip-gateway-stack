@@ -1,75 +1,143 @@
-version: '3.8'
+name: voip
 
 services:
   postgres:
     image: postgres:16
+    container_name: voip-postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: kamailio
-      POSTGRES_PASSWORD: kamailio
-      POSTGRES_DB: kamailio
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      FS_DB_NAME: ${FS_DB_NAME}
     volumes:
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-      - pg_data:/var/lib/postgresql/data
-    networks:
-      - voip_net
-
-  redis:
-    image: redis:7
-    volumes:
-      - redis_data:/data
-    networks:
-      - voip_net
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - voip_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [voip_net]
 
   kamailio:
     build: ./kamailio
+    image: voip-kamailio
+    container_name: voip-kamailio
+    restart: unless-stopped
     environment:
-      DBHOST: postgres
-      DBUSER: kamailio
-      DBPASS: kamailio
-      REDIS_HOST: redis
+      DBURL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      EXTERNAL_IP: ${EXTERNAL_IP}
+      SIP_DOMAIN: ${SIP_DOMAIN}
     ports:
       - "5060:5060/udp"
+    extra_hosts:
+      # tenant1.voip.local henuz gercek bir DNS kaydina sahip degil; seed'deki
+      # subscriber.ha1 tam olarak bu domain icin hesaplandi (bkz.
+      # db/init/02-seed.sql), o yuzden verify-04-register.sh'nin pozitif
+      # REGISTER testi bu adi cozebilmeli. Container'a elle /etc/hosts girmek
+      # yeniden olusturmada kaybolur; bu satir compose'un parcasi oldugu icin
+      # kalicidir.
+      - "tenant1.voip.local:127.0.0.1"
     depends_on:
-      - postgres
-      - redis
-    networks:
-      - voip_net
+      postgres:
+        condition: service_healthy
+    networks: [voip_net]
 
-  freeswitch:
-    build: ./freeswitch
+  xmlapi:
+    build: ./xmlapi
+    image: voip-xmlapi
+    container_name: voip-xmlapi
+    restart: unless-stopped
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      POSTGRES_DB: kamailio
-      POSTGRES_USER: kamailio
-      POSTGRES_PASSWORD: kamailio
-    ports:
-      - "5061:5060/udp"
-      - "8021:8021/tcp"    # fs_cli portu
-      - "16384-16400:16384-16400/udp"  # RTP
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     depends_on:
-      - postgres
-      - kamailio
-    networks:
-      - voip_net
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [voip_net]
 
-  pgadmin:
-    image: dpage/pgadmin4:7
-    container_name: pgadmin
+  freeswitch:
+    build: ./freeswitch
+    image: voip-freeswitch
+    container_name: voip-freeswitch
+    restart: unless-stopped
+    cap_add:
+      - SYS_NICE          # SCHED_FIFO / nice hatasinin giderilmesi
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@example.com   # login email
-      PGADMIN_DEFAULT_PASSWORD: admin123          # login password
+      # max_calls.lua bu ikisini okur (freeswitch.Dbh DSN'i).
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      CODEC_PREFS: ${CODEC_PREFS}
+      FS_EXT_SIP_PORT: ${FS_EXT_SIP_PORT}
+      TRUNK_ENABLED: ${TRUNK_ENABLED}
+      EXTERNAL_IP: ${EXTERNAL_IP}
+      SIP_DOMAIN: ${SIP_DOMAIN}
+      RTP_START: ${RTP_START}
+      RTP_END: ${RTP_END}
+      FS_ESL_PASSWORD: ${FS_ESL_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      FS_DB_NAME: ${FS_DB_NAME}
+      TRUNK_NAME: ${TRUNK_NAME}
+      TRUNK_HOST: ${TRUNK_HOST}
+      TRUNK_USER: ${TRUNK_USER}
+      TRUNK_PASS: ${TRUNK_PASS}
+      TRUNK_REGISTER: ${TRUNK_REGISTER}
+      TRUNK_DID: ${TRUNK_DID}
+    volumes:
+      # autoload_configs ve sip_profiles YAZILABILIR bagli: entrypoint.sh
+      # *.tmpl sablonlarini bu dizinlere isleyip yaziyor.
+      - ./freeswitch/conf/autoload_configs:/opt/freeswitch/etc/freeswitch/autoload_configs
+      - ./freeswitch/conf/sip_profiles:/opt/freeswitch/etc/freeswitch/sip_profiles
+      # YAZILABILIR: default.xml.tmpl entrypoint'te islenip default.xml
+      # olarak buraya yaziliyor (gateway adi .env'den gomuluyor).
+      - ./freeswitch/conf/dialplan:/opt/freeswitch/etc/freeswitch/dialplan
+      # Yol FreeSWITCH'in $${script_dir} degeriyle AYNI OLMALI. Bu derlemede
+      # script_dir = /opt/freeswitch/share/freeswitch/scripts'tir;
+      # /opt/freeswitch/scripts'e baglamak sessizce ise yaramaz — dosya
+      # konteynerde gorunur ama `lua <script>` "Cannot execute script" der.
+      # Dogrulama: fs_cli -x "global_getvar script_dir"
+      - ./freeswitch/scripts:/opt/freeswitch/share/freeswitch/scripts:ro
     ports:
-      - "8080:80"
+      # ext-sip-port ile AYNI deger olmali (internal.xml.tmpl).
+      # Ayri duserlerse FreeSWITCH ulasilamaz bir Contact duyurur ve
+      # dialog ici ACK/BYE kaybolur.
+      - "${FS_SIP_PORT}:5060/udp"
+      # external (trunk) profili. Host portu = KONTEYNER portu olmak ZORUNDA:
+      # FreeSWITCH Contact/Via'ya profil portunu yazar ve `ext-sip-port` bu
+      # derlemede Contact'i etkilemiyor (internal profilde olculdu). Portlar
+      # ayri duserse saglayici geri donen istekleri yanlis yere gonderir.
+      - "${FS_EXT_SIP_PORT}:${FS_EXT_SIP_PORT}/udp"
+      - "8021:8021/tcp"
+      - "${RTP_START}-${RTP_END}:${RTP_START}-${RTP_END}/udp"
     depends_on:
-      - postgres
-    networks:
-      - voip_net
+      postgres:
+        condition: service_healthy
+      xmlapi:
+        condition: service_healthy
+    networks: [voip_net]
 
 volumes:
-  pg_data:
-  redis_data:
+  voip_pg_data:
 
 networks:
   voip_net:
     driver: bridge
+    ipam:
+      config:
+        # Docker'in otomatik atadigi subnet host'a gore degisir (bu makinede
+        # 192.168.155.0/24 cikti, 172.16.0.0/12 disinda kaldi). ESL ACL'i
+        # (event_socket.conf.xml.tmpl -> acl.conf.xml) 172.16.0.0/12'yi
+        # beyaz listeye aliyor; bu subnet'i sabitlemek o kuralin her
+        # ortamda gercekten calismasini garantiliyor.
+        - subnet: 172.30.0.0/16

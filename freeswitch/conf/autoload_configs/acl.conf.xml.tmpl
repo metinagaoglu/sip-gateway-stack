@@ -1,0 +1,58 @@
+<configuration name="acl.conf" description="Network Lists">
+  <network-lists>
+    <!--
+	 These ACL's are automatically created on startup.
+
+	 rfc1918.auto  - RFC1918 Space
+	 nat.auto      - RFC1918 Excluding your local lan.
+	 localnet.auto - ACL for your local lan.
+	 loopback.auto - ACL for your local lan.
+    -->
+
+    <list name="lan" default="allow">
+      <node type="deny" cidr="192.168.42.0/24"/>
+      <node type="allow" cidr="192.168.42.42/32"/>
+    </list>
+
+    <!-- ESL (event_socket) icin: sadece loopback.auto yeterli degil, cunku
+         compose 8021'i host'a publish ediyor ve Docker'in port-publish yolu
+         (docker-proxy/iptables DNAT) baglantiyi container'a loopback kaynakli
+         gibi GOSTERMIYOR. Docker bridge subnet'ini (voip_net,
+         docker-compose.yml'de 172.30.0.0/16 olarak sabitlendi, 172.16.0.0/12
+         icinde) beyaz listeye alarak hem docker compose exec (gercek
+         loopback) hem host'tan published port uzerinden gelen baglantilar
+         (bridge gateway kaynakli gorunur) calisir hale getiriliyor. -->
+    <list name="esl_access" default="deny">
+      <node type="allow" cidr="127.0.0.0/8"/>
+      <node type="allow" cidr="::1/128"/>
+      <node type="allow" cidr="172.16.0.0/12"/>
+    </list>
+
+    <!-- Kimlik dogrulamayi Kamailio yapiyor; FreeSWITCH'in internal profili
+         auth-calls=false ile calisiyor. Bu ACL TEK savunma hattidir —
+         internal profil disariya acilmamalidir. Ayni CIDR'lar hem
+         apply-inbound-acl (kim SIP gonderebilir) hem apply-nat-acl (kimin
+         icin ext-rtp-ip/ext-sip-ip uygulanir) icin kullaniliyor
+         (bkz. sip_profiles/internal.xml.tmpl): profile Kamailio disinda
+         dogrudan hicbir yerden erisilebilir olmamali. -->
+    <list name="trusted" default="deny">
+      <node type="allow" cidr="172.16.0.0/12"/>   <!-- docker bridge -->
+      <node type="allow" cidr="127.0.0.0/8"/>
+    </list>
+
+    <!--
+	This will traverse the directory adding all users
+	with the cidr= tag to this ACL, when this ACL matches
+	the users variables and params apply as if they
+	digest authenticated.
+    -->
+    <list name="domains" default="deny">
+      <!-- domain= is special it scans the domain from the directory to build the ACL -->
+      <node type="allow" domain="$${domain}"/>
+      <!-- use cidr= if you wish to allow ip ranges to this domains acl. -->
+      <!-- <node type="allow" cidr="192.168.0.0/24"/> -->
+    </list>
+
+  </network-lists>
+</configuration>
+

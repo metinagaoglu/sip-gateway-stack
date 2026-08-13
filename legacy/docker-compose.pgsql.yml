@@ -1,0 +1,118 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_USER: kamailio
+      POSTGRES_PASSWORD: kamailio
+      POSTGRES_DB: kamailio
+    volumes:
+      - ./init_full_pgsql.sql:/docker-entrypoint-initdb.d/init.sql  # ← Updated
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kamailio"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - voip_net
+
+  redis:
+    image: redis:7
+    container_name: redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - voip_net
+
+  # NEW: XML API Service for FreeSWITCH Directory/Dialplan
+  xmlapi:
+    build: ./xmlapi
+    container_name: xmlapi
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: kamailio
+      POSTGRES_USER: kamailio
+      POSTGRES_PASSWORD: kamailio
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - voip_net
+
+  kamailio:
+    build: ./kamailio
+    container_name: kamailio
+    environment:
+      DBHOST: postgres
+      DBUSER: kamailio
+      DBPASS: kamailio
+      REDIS_HOST: redis
+    ports:
+      - "5060:5060/udp"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - voip_net
+
+  freeswitch:
+    build: ./freeswitch
+    container_name: freeswitch
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: kamailio
+      POSTGRES_USER: kamailio
+      POSTGRES_PASSWORD: kamailio
+      XMLAPI_URL: http://xmlapi:8080
+    ports:
+      - "5061:5060/udp"
+      - "8021:8021/tcp"    # Event Socket (fs_cli)
+      - "16384-16400:16384-16400/udp"  # RTP
+    volumes:
+      # Mount only customized config files, not entire conf directory
+      - ./freeswitch/conf/autoload_configs/modules.conf.xml:/opt/freeswitch/etc/freeswitch/autoload_configs/modules.conf.xml:ro
+      - ./freeswitch/conf/autoload_configs/xml_curl.conf.xml:/opt/freeswitch/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
+      - ./freeswitch/conf/autoload_configs/cdr_pg_csv.conf.xml:/opt/freeswitch/etc/freeswitch/autoload_configs/cdr_pg_csv.conf.xml:ro
+      - ./freeswitch/conf/autoload_configs/pgsql.conf.xml:/opt/freeswitch/etc/freeswitch/autoload_configs/pgsql.conf.xml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      xmlapi:
+        condition: service_healthy
+      kamailio:
+        condition: service_started
+    networks:
+      - voip_net
+
+  pgadmin:
+    image: dpage/pgadmin4:7
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "8081:80"  # Changed to avoid conflict with xmlapi
+    depends_on:
+      - postgres
+    networks:
+      - voip_net
+
+volumes:
+  pg_data:
+  redis_data:
+
+networks:
+  voip_net:
+    driver: bridge

@@ -1,0 +1,24 @@
+.superpowers/
+.env
+freeswitch/build.log
+*.log
+
+# entrypoint.sh, *.tmpl sablonlarini ayni adin .tmpl'siz haline render eder;
+# bu ciktilar sirlar icerebilir (orn. FS_ESL_PASSWORD) ve asla commit edilmemeli.
+# Bind-mount nedeniyle host'ta da olusurlar (bkz. freeswitch/entrypoint.sh).
+freeswitch/conf/autoload_configs/event_socket.conf.xml
+freeswitch/conf/autoload_configs/switch.conf.xml
+freeswitch/conf/autoload_configs/pgsql.conf.xml
+freeswitch/conf/autoload_configs/db.conf.xml
+# xml_curl.conf.xml ve acl.conf.xml sir tasimiyor ama ayni bind-mount/render
+# mekanizmasindan geciyor; tutarlilik icin ayni sekilde yok sayiliyor.
+freeswitch/conf/autoload_configs/xml_curl.conf.xml
+freeswitch/conf/autoload_configs/acl.conf.xml
+freeswitch/conf/autoload_configs/cdr_pg_csv.conf.xml
+
+# internal.xml.tmpl'den render edilir (Task 8); ayni bind-mount/render
+# mekanizmasi (sip_profiles de yazilabilir bagli).
+freeswitch/conf/dialplan/default.xml
+freeswitch/conf/sip_profiles/internal.xml
+freeswitch/conf/sip_profiles/external/trunk.xml
+freeswitch/conf/sip_profiles/external.xml

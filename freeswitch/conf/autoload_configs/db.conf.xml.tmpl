@@ -1,0 +1,15 @@
+<configuration name="db.conf" description="Database Configuration">
+  <settings>
+    <!-- PostgreSQL baglanti dizesi (libpq anahtar=deger formati).
+         dbname ${FS_DB_NAME}, ${POSTGRES_DB} DEGIL: mod_db'nin tuttugu
+         `limit_data`/`db_data` tablolari FreeSWITCH'in OPERASYONEL verisidir
+         ve Task 6'da core DB icin ayrilan `${FS_DB_NAME}` veritabanina
+         aittir. `${POSTGRES_DB}` Kamailio'nun alani (subscriber, location,
+         dispatcher) ve raporlama tablosu cdr icindir.
+         Onceki deger ${POSTGRES_DB} idi; limit sayaclari yanlis veritabaninda
+         olusuyordu. Belirti sinsi: limit FIILEN CALISIYOR (486 Busy Here
+         donuyor) ama sayaclar core DB'de gorunmuyordu, yani "db arka ucu
+         devrede degil" gibi okunuyordu. -->
+    <param name="odbc-dsn" value="pgsql://host=postgres port=5432 dbname=${FS_DB_NAME} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} options='-c client_encoding=utf8'"/>
+  </settings>
+</configuration>

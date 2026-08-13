@@ -1,0 +1,19 @@
+<configuration name="xml_curl.conf" description="cURL XML Gateway">
+  <bindings>
+    <!-- Directory (User Authentication) -->
+    <binding name="directory">
+      <param name="gateway-url" value="http://xmlapi:8080/fs/directory" bindings="directory"/>
+      <!-- gateway-credentials bilerek yok: xmlapi yalnizca voip_net icinden
+           erisilebilir ve disariya port yayinlamaz (bkz. docker-compose.yml). -->
+      <param name="disable-100-continue" value="true"/>
+      <param name="timeout" value="5"/>
+    </binding>
+
+    <!-- Dialplan (Routing Rules) -->
+    <binding name="dialplan">
+      <param name="gateway-url" value="http://xmlapi:8080/fs/dialplan" bindings="dialplan"/>
+      <param name="disable-100-continue" value="true"/>
+      <param name="timeout" value="5"/>
+    </binding>
+  </bindings>
+</configuration>

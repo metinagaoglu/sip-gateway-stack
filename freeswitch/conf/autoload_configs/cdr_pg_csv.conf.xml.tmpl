@@ -1,0 +1,48 @@
+<configuration name="cdr_pg_csv.conf" description="CDR PostgreSQL">
+  <settings>
+    <!-- Gecerli bir libpq baglanti dizesi. Daha once burada `${dsn(kamailio)}`
+         yaziyordu; FreeSWITCH'te boyle bir ifade YOKTUR (`${x}` kanal
+         degiskeni, `$${x}` global, `dsn()` fonksiyonu yok) ve hic cozulmezdi. -->
+    <param name="db-info" value="host=postgres port=5432 dbname=${POSTGRES_DB} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD}"/>
+    <param name="db-table" value="cdr"/>
+    <param name="legs" value="a"/>
+    <param name="rotate-on-hup" value="true"/>
+
+    <!-- DIKKAT: bu modulun binary'sinde YALNIZCA su parametreler var:
+         db-info, db-table, rotate-on-hup, legs, debug.
+         `log-dir`, `table`, `log-b-leg`, `filter-zerobillsec`,
+         `write-cdr-on-exit` YOKTUR — yazilirsa sessizce yok sayilir ve
+         "yapilandirdim" yanilgisi yaratir. Dogrulama:
+           grep -aoE "db-info|db-table|log-dir|..." mod_cdr_pg_csv.so
+         verify-10 adim 3 bu parametrelerden birinin geri sizmasini yakalar. -->
+  </settings>
+
+  <!-- <schema> ZORUNLUDUR. Modul INSERT ifadesini bu listeden uretir; blok
+       yoksa alan listesi hic olusmaz ve modul her cagri sonunda CS_REPORTING
+       asamasinda cop bir pointer'i dereference ederek FreeSWITCH'i SIGSEGV
+       ile oldurur (backtrace: my_on_reporting, mod_cdr_pg_csv.c:356,
+       cdr_field = 0x8). Bu hata gercekten yasandi; bkz. progress.md.
+
+       Liste `cdr` tablosunun kolonlariyla BIREBIR uyusmalidir.
+       `id` ve `created_at` veritabani tarafindan doldurulur, buraya girmez.
+       `answer_stamp` da girmez — yerine answer_epoch kullaniliyor (sebep
+       01-schema.sql icindeki aciklamada). -->
+  <schema>
+    <field name="tenant_id"              var="tenant_id"              quote="false"/>
+    <field name="uuid"                   var="uuid"                   quote="true"/>
+    <field name="caller_id_name"         var="caller_id_name"         quote="true"/>
+    <field name="caller_id_number"       var="caller_id_number"       quote="true"/>
+    <field name="destination_number"     var="destination_number"     quote="true"/>
+    <field name="context"                var="context"                quote="true"/>
+    <field name="start_stamp"            var="start_stamp"            quote="true"/>
+    <field name="end_stamp"              var="end_stamp"              quote="true"/>
+    <field name="answer_epoch"           var="answer_epoch"           quote="false"/>
+    <field name="duration"               var="duration"               quote="false"/>
+    <field name="billsec"                var="billsec"                quote="false"/>
+    <field name="hangup_cause"           var="hangup_cause"           quote="true"/>
+    <field name="sip_hangup_disposition" var="sip_hangup_disposition" quote="true"/>
+    <field name="read_codec"             var="read_codec"             quote="true"/>
+    <field name="write_codec"            var="write_codec"            quote="true"/>
+    <field name="remote_media_ip"        var="remote_media_ip"        quote="true"/>
+  </schema>
+</configuration>

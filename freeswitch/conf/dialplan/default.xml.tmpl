@@ -1,0 +1,117 @@
+<include>
+  <context name="default">
+
+    <!-- Her cagrida tenant_id garanti altina alinir.
+         Directory'den gelen kullanicilarda xmlapi set eder;
+         gelmeyenlerde (ornegin trunk) burada varsayilan atanir.
+         CDR INSERT'i bu degiskene bagli — bos kalirsa INSERT patlar
+         (bkz. Task 10, mod_cdr_pg_csv). -->
+    <extension name="tenant-default" continue="true">
+      <condition field="${tenant_id}" expression="^$">
+        <action application="set" data="tenant_id=1"/>
+      </condition>
+    </extension>
+
+    <extension name="echo-test">
+      <condition field="destination_number" expression="^9999$">
+        <action application="answer"/>
+        <action application="sleep" data="500"/>
+        <action application="echo"/>
+      </condition>
+    </extension>
+
+    <extension name="tone-test">
+      <condition field="destination_number" expression="^9998$">
+        <action application="answer"/>
+        <action application="playback" data="tone_stream://%(2000,4000,440,480);loops=10"/>
+        <action application="hangup"/>
+      </condition>
+    </extension>
+
+    <!-- `limit` uygulamasi sinir asildiginda cagriyi transfer hedefine yollar;
+         hedef verilmediginde VARSAYILAN hedef `limit_exceeded` extension'idir.
+         BU EXTENSION ZORUNLU. Tanimli olmadiginda cagri asagidaki `local-user`
+         desenine dusuyordu (`limit_exceeded` harfle basladigi icin eslesiyor),
+         bridge `sofia/internal/limit_exceeded@...` deniyor, Kamailio bulamiyor
+         ve cagri donguye girip `483 Too Many Hops` ile duşuyordu — yani limit
+         "calisiyor" ama arayan anlamsiz bir hata aliyordu.
+         local-user'dan ONCE gelmeli; continue verilmiyor, burada biter. -->
+    <extension name="limit_exceeded">
+      <condition field="destination_number" expression="^limit_exceeded$">
+        <!-- USER_BUSY, arayana 486 Busy Here dondurur: es zamanli cagri
+             siniri icin dogru SIP semantigi budur. -->
+        <action application="hangup" data="USER_BUSY"/>
+      </condition>
+    </extension>
+
+    <!-- Kullanicidan kullaniciya: FreeSWITCH kayitlari bilmedigi icin
+         cagri Kamailio'ya geri gonderilir (profil outbound-proxy'si),
+         Kamailio lookup("location") ile aboneye ulastirir. -->
+    <!-- Desen NEDEN boyle: aboneler seed'de kullanici ADIYLA tanimli
+         (alice, bob) — numerik bir extension eslemesi yok. Onceki
+         `^(\d{2,7})$` yalnizca rakam kabul ettigi icin `bob` aramasi bu
+         extension'a HIC dusmuyordu ve cagri sessizce duşuyordu.
+         Iki kol var:
+           - `[a-zA-Z][a-zA-Z0-9_.-]{1,31}` : HARFLE BASLAYAN kullanici adi
+           - `\d{2,7}`                      : kisa numerik dahili
+         Harfle baslama sarti ve numerik kolun 7 haneyle sinirli olmasi
+         KASITLI: boylece `05551234567` gibi uzun bir numara buraya DUSMEZ
+         ve Task 12'nin trunk desenine kalir. Desen genisletilirken bu
+         siniri korumak gerekir. -->
+    <extension name="local-user">
+      <condition field="destination_number" expression="^([a-zA-Z][a-zA-Z0-9_.-]{1,31}|\d{2,7})$">
+        <action application="set" data="call_timeout=30"/>
+        <action application="set" data="hangup_after_bridge=true"/>
+
+        <!-- Es zamanli cagri siniri. Deger PostgreSQL'den (subscriber.max_calls)
+             Lua ile okunur; mod_pgsql dialplan uygulamasi saglamaz.
+             ${sip_from_host} KULLANILIYOR, ${domain_name} DEGIL: bu yiginda
+             kimlik dogrulamasi Kamailio'da yapildigi icin `domain_name` HIC
+             set edilmez ve FreeSWITCH yerine konteyner IP'sini koyar (ayni
+             tuzak bridge hedefinde de yasandi, yukaridaki aciklamaya bakin).
+             `db` arka ucu sayaci CORE DB'de (PostgreSQL, limit_data) tutar;
+             mod_db yuklu olmazsa bu satir sessizce atlanir. -->
+        <action application="lua" data="max_calls.lua ${sip_from_user} ${sip_from_host}"/>
+        <action application="limit" data="db user_calls ${sip_from_user} ${user_max_calls}"/>
+        <!-- NEDEN ${domain_name} DEGIL: `domain_name` kanal degiskeni ancak
+             cagiran taraf FreeSWITCH directory'sinden dogrulandiginda set
+             edilir. Bu yiginda kimlik dogrulamasi Kamailio'da yapiliyor
+             (auth-calls=false), dolayisiyla degisken HIC set edilmiyor ve
+             FreeSWITCH onun yerine kendi yerel adresini koyuyordu:
+             b-leg `sofia/internal/bob@172.30.0.3` olarak cikiyor, Kamailio
+             ise use_domain=1 ile `bob@tenant1.voip.local` aradigi icin
+             lookup("location") basarisiz olup 404 donuyordu.
+             ${sip_from_host} DOGRULANMIS bir degerdir: Kamailio digest
+             realm'i olarak From domain'ini kullanir, yani cagri gercekten
+             o kiracidan gelir. Boylece cagri arayanin kiracisinda kalir
+             (cross-tenant arama olmaz). -->
+        <action application="bridge" data="sofia/internal/$1@${sip_from_host}"/>
+      </condition>
+    </extension>
+
+    <!-- Dis numara -> SIP trunk. local-user'dan SONRA gelmeli: kisa dahili
+         numaralar ve kullanici adlari once yerel kurallara dusmeli.
+         Desen kasitli olarak DAR:
+           +905551234567   E.164
+           00905551234567  uluslararasi prefiks
+           5551234567      10-15 hane
+         9999/9998 (servis kodlari), `bob` (kullanici adi) ve 1001 gibi kisa
+         dahililer bu desene UYMAZ — verify-12 adim 4 bunlari tek tek sinar.
+         Gateway adi bu dosya bir SABLON (.tmpl) oldugu icin entrypoint'te
+         envsubst ile GOMULUR. Onceki yaklasim `$${trunk_name}` global
+         degiskeniydi ve BASLANGIC SIRASINA baglıydi: FreeSWITCH ilk acilista
+         dialplan'i switch.conf'taki <variables> blogundan ONCE okuyor, deger
+         bos cozuluyor ve hedef `sofia/gateway//<numara>` oluyordu. `reloadxml`
+         sonrasi duzeliyordu — yani her yeniden baslatmadan sonra giden
+         cagrilar SESSIZCE bozuk kaliyordu. Sablonla bu bagimlilik tamamen
+         ortadan kalkti. (Ayni sinif sira sorunu Task 6'da codec tercihlerinde
+         de yasanmisti.) -->
+    <extension name="trunk-out">
+      <condition field="destination_number" expression="^(\+?\d{10,15}|00\d+)$">
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="bridge" data="sofia/gateway/${TRUNK_NAME}/$1"/>
+      </condition>
+    </extension>
+
+  </context>
+</include>
