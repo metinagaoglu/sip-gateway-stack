@@ -59,6 +59,40 @@ Yeni tek container: `web` (nginx:alpine). TLS'i o terminate eder, Kamailio ile
 Sinyalizasyon nginx üzerinden geçer, **medya doğrudan tarayıcı ile FreeSWITCH
 arasındadır**. nginx medya yoluna hiç girmez.
 
+### Medya akışının mekaniği
+
+Birbirinden bağımsız iki medya bacağı vardır, FreeSWITCH ortada köprüdür:
+
+```
+tarayıcı ══SRTP/DTLS, OPUS, 1 port══> FreeSWITCH ──RTP, PCMU, 2 port──> Zoiper
+```
+
+Sıra:
+
+1. Tarayıcı `m=audio 9 UDP/TLS/RTP/SAVPF ...` teklif eder. Port `9` bir
+   placeholder'dır; gerçek adres `a=candidate` satırlarındadır. Yanında
+   `a=fingerprint`, `a=setup:actpass`, `a=ice-ufrag`/`a=ice-pwd`, `a=rtcp-mux`.
+2. FreeSWITCH `c=IN IP4 ${EXTERNAL_IP}` ve RTP aralığından bir port ile cevap
+   verir; kendi fingerprint'i `dtls-srtp.pem`'den gelir.
+3. Tarayıcı o adrese STUN binding request atar, FreeSWITCH cevaplar ve çift
+   doğrulanır. Docker RTP aralığını publish ettiği için host paketi container'a
+   DNAT'lar ve kaynak IP korunur; FreeSWITCH tarayıcının gerçek LAN adresini
+   görür.
+4. Aynı UDP portu üzerinde DTLS el sıkışması olur. Her taraf karşının
+   sertifika fingerprint'ini SDP'deki değerle karşılaştırır — MITM koruması
+   buradan gelir. Ortak sırdan SRTP anahtarları türetilir (RFC 5764).
+5. `rtcp-mux` sayesinde SRTP ve SRTCP tek portta akar. FreeSWITCH deşifre eder,
+   OPUS→PCMU transcode eder, Zoiper'a ayrı bir port çiftinden düz RTP gönderir.
+
+3. adım risk merdiveninin 1. maddesiyle aynı noktadır: `apply-candidate-acl`
+tarayıcının candidate'ını elerse FreeSWITCH binding check'i nereye göndereceğini
+bilemez.
+
+**Port bütçesi:** `RTP_START=16384`, `RTP_END=16403` → 20 port. Tarayıcı bacağı
+mux ile 1 port, Zoiper bacağı RTP+RTCP ile 2 port harcar, yani eşzamanlı ~6
+çağrı. Faz 1 için yeterli; eşzamanlılık artarsa ilk büyütülecek değer
+`RTP_END`'dir.
+
 ### Neden TLS kenarda, Kamailio'da değil
 
 Tarayıcı hem sayfayı hem WebSocket'i TLS ister ve Chrome self-signed
@@ -212,8 +246,22 @@ session_timers: false
 pcConfig: { iceServers: [] }
 ```
 
-`iceServers: []` bilinçli: tarayıcı ile FreeSWITCH aynı LAN'da, host candidate
-yeterli. STUN eklemek ICE toplama süresini uzatır ve hiçbir şey kazandırmaz.
+`iceServers: []` bilinçli. STUN'un işi istemcinin NAT arkasındaki public
+eşlemesini keşfetmektir; burada gerek yok çünkü sunucu tarafının adresi zaten
+erişilebilir (`EXTERNAL_IP` + publish edilmiş RTP aralığı), bağlantıyı tarayıcı
+başlatır ve FreeSWITCH symmetric RTP ile paketin geldiği kaynağa geri gönderir.
+STUN eklemek yalnızca ICE toplama süresini uzatır. Production'da
+`iceServers` eklemenin gerçek gerekçesi TURN'dür: istemcinin ağı UDP'yi
+tamamen kapatmışsa medyayı TCP/443'e sokmak gerekir, STUN o durumda da
+kurtarmaz.
+
+**Mikrofon izni ICE için ön koşuldur.** Chrome, mikrofon izni verilmemişken
+yerel IP'leri saklar ve host candidate yerine `xxxxxxxx.local` biçiminde mDNS
+adı yayınlar. FreeSWITCH bu adı çözemez, ICE connectivity check hiç başlamaz.
+Uygulamanın `getUserMedia` çağırması bu yüzden sadece ses için değil, gerçek
+`192.168.1.x` host candidate'ının açılması için de gereklidir. Sıra önemli:
+izin alınmadan çağrı kurulmaya çalışılırsa belirti "çağrı kuruluyor, ses yok"
+olur ve sebebi SDP'de `.local` candidate'larından okunur.
 
 `web/nginx.conf`:
 
