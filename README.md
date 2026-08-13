@@ -1,93 +1,93 @@
 # VoIP Stack — Kamailio + FreeSWITCH + PostgreSQL
 
-Kamailio (SIP proxy/registrar), FreeSWITCH (medya sunucusu) ve PostgreSQL'in
-tek bir Docker Compose yiginda calistigi cok kiracili SIP altyapisi.
-Butun yapilandirma `.env` uzerinden surulur; kod icinde ortama ozgu deger yok.
+A multi-tenant SIP platform running Kamailio (SIP proxy/registrar), FreeSWITCH
+(media server) and PostgreSQL in a single Docker Compose stack. Everything is
+driven by `.env`; no environment-specific values are hardcoded.
 
-## Mimari
+## Architecture
 
 ```
   softphone ──UDP 5060──> Kamailio ──dispatcher──> FreeSWITCH
                              │                        │
-                             │  (kayit/kimlik dogr.)  │  (medya, dialplan)
+                             │  (registration/auth)   │  (media, dialplan)
                              ▼                        ▼
                         PostgreSQL: kamailio      PostgreSQL: freeswitch
                         subscriber, location,     channels, calls,
                         dispatcher, cdr           registrations, limit_data
 ```
 
-**Is bolumu:** Kamailio kaydi ve digest kimlik dogrulamasini yapar, cagriyi
-dispatcher ile FreeSWITCH'e verir. FreeSWITCH B2BUA olarak medyayi anchor'lar;
-kayitlari bilmedigi icin kullanicidan kullaniciya cagrilari `outbound-proxy`
-ile Kamailio'ya geri gonderir, Kamailio da `lookup("location")` ile hedefe
-ulastirir. FreeSWITCH'te `auth-calls=false` — kimlik dogrulama tek noktada
-(Kamailio) yapilir, FreeSWITCH'e erisim ACL ile kisitlanir.
+**Division of labour:** Kamailio owns registration and digest authentication,
+then hands the call to FreeSWITCH via the dispatcher. FreeSWITCH anchors media
+as a B2BUA. Because FreeSWITCH knows nothing about registrations, user-to-user
+calls are sent back to Kamailio through `outbound-proxy`, and Kamailio resolves
+the target with `lookup("location")`. FreeSWITCH runs with `auth-calls=false` —
+authentication happens in exactly one place (Kamailio) and access to FreeSWITCH
+is restricted by ACL instead.
 
-**Iki veritabani kasitlidir:** `kamailio` abone/yonlendirme/raporlama verisini,
-`freeswitch` ise FreeSWITCH'in operasyonel durumunu tutar.
+**The two databases are deliberate:** `kamailio` holds subscriber, routing and
+reporting data; `freeswitch` holds FreeSWITCH's own operational state.
 
-## Hizli baslangic
+## Quick start
 
 ```bash
 cp .env.example .env
-# .env icindeki EXTERNAL_IP'yi bu makinenin LAN adresi yap, sifreleri degistir
+# set EXTERNAL_IP to this machine's LAN address, change the passwords
 docker compose up -d --build
 ./scripts/verify-all.sh
 ```
 
-`verify-all.sh` butun dogrulama scriptlerini kosar ve sonunda yigin durumunu
-(kapsayici saglik + FreeSWITCH RestartCount) ozetler. Beklenen: `FAIL=0`.
+`verify-all.sh` runs every verification script and finishes with a stack
+summary (container health + FreeSWITCH RestartCount). Expected: `FAIL=0`.
 
-## Softphone ayarlari (Zoiper vb.)
+## Softphone settings (Zoiper etc.)
 
-| Alan | Deger |
+| Field | Value |
 |---|---|
-| Domain / SIP sunucu | `tenant1.voip.local` |
-| Kullanici | `alice` (veya `bob`) |
-| Sifre | `alice123` (`bob123`) |
+| Domain / SIP server | `tenant1.voip.local` |
+| Username | `alice` (or `bob`) |
+| Password | `alice123` (`bob123`) |
 | Transport | **UDP** |
 
-Kamailio yalnizca UDP dinler; TCP secilirse "no transport left to try" alinir.
-`tenant1.voip.local` cozulmuyorsa `/etc/hosts`'a `<EXTERNAL_IP> tenant1.voip.local`
-ekleyin ya da outbound proxy olarak `<EXTERNAL_IP>:5060` verin.
+Kamailio listens on UDP only; picking TCP yields "no transport left to try".
+If `tenant1.voip.local` does not resolve, add `<EXTERNAL_IP> tenant1.voip.local`
+to `/etc/hosts` or set the outbound proxy to `<EXTERNAL_IP>:5060`.
 
-**Domain'i IP yapmayin:** `subscriber.ha1` degeri
-`md5(kullanici:domain:sifre)` olarak hesaplanir; realm degisirse sonsuz 401
-donusu olusur.
+**Do not replace the domain with an IP.** `subscriber.ha1` is computed as
+`md5(user:domain:password)`; changing the realm produces an endless 401 loop.
 
-### Test numaralari
+### Test numbers
 
-| Numara | Davranis |
+| Number | Behaviour |
 |---|---|
-| `9999` | echo (soyledigini geri duyar) |
-| `9998` | tone testi |
-| `bob` / `alice` | kullanicidan kullaniciya cagri |
-| 10-15 hane / `+E.164` / `00...` | SIP trunk (etkinse) |
+| `9999` | echo (you hear yourself back) |
+| `9998` | tone test |
+| `bob` / `alice` | user-to-user call |
+| 10–15 digits, `+E.164`, `00…` | SIP trunk (when enabled) |
 
-## Kullanici ve kiraci ekleme
+## Adding users and tenants
 
 ```bash
-./tools/add-user.sh <kullanici> <sifre> <domain>
+./tools/add-user.sh <user> <password> <domain>
 ```
 
-`ha1` degeri bu script tarafindan dogru realm ile hesaplanir. Elle
-ekliyorsaniz: `ha1 = md5(kullanici:domain:sifre)`.
+The script computes `ha1` with the correct realm. If you insert rows by hand:
+`ha1 = md5(user:domain:password)`.
 
-Kiracilik `use_domain=1` ile calisir: `alice@tenant1` ve `alice@tenant2`
-FARKLI kullanicilardir ve birinin sifresi digerini acmaz. Bu davranis
-`scripts/verify-91-tenant-isolation.sh` ile dogrulanir.
+Tenancy relies on `use_domain=1`: `alice@tenant1` and `alice@tenant2` are
+**different** users, and one tenant's password will not unlock the other's
+account. This behaviour is verified by `scripts/verify-91-tenant-isolation.sh`.
 
 ## SIP trunk
 
-Saglayicidan bagimsiz, tek sablon iki modu karsilar. `.env`:
+Provider-agnostic; a single template covers both modes. In `.env`:
 
 ```
 TRUNK_ENABLED=true
-TRUNK_NAME=<gateway adi>
-TRUNK_HOST=<saglayici host>
-TRUNK_USER=<kullanici>
-TRUNK_PASS=<sifre>
-TRUNK_REGISTER=true     # credential modu; IP yetkilendirme icin false
+TRUNK_NAME=<gateway name>
+TRUNK_HOST=<provider host>
+TRUNK_USER=<user>
+TRUNK_PASS=<password>
+TRUNK_REGISTER=true     # credential mode; false for IP authorization
 ```
 
 ```bash
@@ -95,113 +95,116 @@ docker compose up -d --build freeswitch
 ./scripts/verify-12-trunk-out.sh
 ```
 
-`TRUNK_ENABLED=false` iken gateway hic olusturulmaz (entrypoint uretilen
-`trunk.xml`'i siler), boylece bos adrese sonsuz REGISTER denemesi olmaz.
-Gelen cagri (Task 13) ve TLS/SRTP **henuz kapsam disi**.
+While `TRUNK_ENABLED=false` no gateway is created at all (the entrypoint
+deletes the rendered `trunk.xml`), so FreeSWITCH never retries REGISTER against
+an empty address. Inbound trunk calls and TLS/SRTP are **out of scope for now**.
 
-## Bilinen tuzaklar
+## Known pitfalls
 
-Bu bolum gercekten yasanmis hatalari kaydediyor; degisiklik yaparken okuyun.
+This section records failures that actually happened. Read it before changing
+configuration.
 
-**Yapilandirma degisikligi gorunmuyorsa `--build` gerekiyor olabilir.**
-`kamailio.cfg` ve `freeswitch/entrypoint.sh` image'a COPY edilir, bind-mount
-EDILMEZ. `docker compose restart` bunlari almaz:
+**If a config change seems to have no effect, you probably need `--build`.**
+`kamailio.cfg` and `freeswitch/entrypoint.sh` are COPY'd into the image, not
+bind-mounted, so `docker compose restart` will not pick them up:
 
 ```bash
-docker compose up -d --build kamailio     # veya freeswitch
+docker compose up -d --build kamailio     # or freeswitch
 ```
 
-`verify-08` adim 6 calisan Kamailio konfigurasyonunu repo ile karsilastirip
-bu durumu yakalar.
+`verify-08` step 6 catches this by diffing the running Kamailio config against
+the repository.
 
-**FreeSWITCH global degiskenlerine (`$${...}`) yapilandirma degeri baglamayin.**
-`autoload_configs` alfabetik yuklenir; `sofia.conf.xml` ve dialplan,
-`switch.conf.xml`'deki `<variables>` blogundan ONCE okunabilir ve deger bos
-cozulur. `reloadxml` sonrasi duzeldigi icin fark edilmesi zordur. Bu yuzden
-codec tercihleri ve trunk gateway adi `.env`'den sablona (`*.tmpl`) GOMULUR.
+**Never bind a configuration value to a FreeSWITCH global (`$${...}`).**
+`autoload_configs` is loaded alphabetically, so `sofia.conf.xml` and the
+dialplan can be read *before* the `<variables>` block in `switch.conf.xml`,
+leaving the value empty. It looks correct after `reloadxml`, which makes it hard
+to spot. For this reason codec preferences and the trunk gateway name are
+substituted into templates (`*.tmpl`) from `.env`.
 
-**Yeni bir `.env` degiskeni eklerken UC yer guncellenmeli:** `.env(.example)`,
-`freeswitch/entrypoint.sh` icindeki `VARS` beyaz listesi, ve
-`docker-compose.yml`'deki ilgili servisin `environment` blogu. Biri atlanirsa
-envsubst bos string yazar ve ayar sessizce kaybolur.
+**A new `.env` variable must be declared in three places:** `.env(.example)`,
+the `VARS` allowlist in `freeswitch/entrypoint.sh`, and the `environment` block
+of the relevant service in `docker-compose.yml`. Miss one and envsubst writes an
+empty string, silently dropping the setting.
 
-**Port esitligi:** `FS_EXT_SIP_PORT` icin host portu = kapsayici portu olmak
-zorunda. FreeSWITCH Contact/Via'ya profil portunu yazar ve `ext-sip-port` bu
-derlemede Contact'i etkilemiyor; portlar ayri duserse dialog ici istekler
-kaybolur.
+**Port equality:** for `FS_EXT_SIP_PORT` the host port must equal the container
+port. FreeSWITCH writes the *profile* port into Contact/Via, and `ext-sip-port`
+does not affect Contact in this build; if the ports differ, in-dialog requests
+are lost.
 
-**`${domain_name}` bu yiginda hic set edilmez** (kimlik dogrulama Kamailio'da,
-FreeSWITCH directory'sinde degil). Dialplan'da `${sip_from_host}` kullanin.
+**`${domain_name}` is never set in this stack** (authentication happens in
+Kamailio, not the FreeSWITCH directory). Use `${sip_from_host}` in the dialplan.
 
-**`mod_cdr_pg_csv` `<schema>` blogu olmadan yuklenmemeli** — alan listesi
-olusmaz ve surec her cagri sonunda SIGSEGV verir.
+**Never load `mod_cdr_pg_csv` without a `<schema>` block** — the field list is
+never built and the process segfaults at the end of every call.
 
-**`git checkout` ile branch degistirdikten sonra kapsayicilari yenileyin.**
-Checkout, bind-mount edilen dizinleri silip yeniden olusturabilir; kapsayici
-eski inode'u tuttugu icin mount KOPAR ve dosyalar konteynerde kaybolur
-(`No such file or directory`) — host'ta dururken. Cozum:
+**After switching branches with `git checkout`, recreate the containers.**
+Checkout can delete and recreate bind-mounted directories; the container keeps
+the old inode, the mount breaks, and files vanish inside the container
+(`No such file or directory`) while still present on the host:
 
 ```bash
 docker compose up -d --force-recreate
 ```
 
-**Kamailio, FreeSWITCH'ten once baslayabilir ve bu NORMAL'dir.** compose'da
-kamailio'nun freeswitch'e `depends_on`'u yok (karsilikli bagimlilik olurdu).
-Dispatcher hedefi baslangicta cozumleme yaptigi icin bu durum eskiden butun
-cagrilari kalici olarak 503 yapiyordu. Iki onlem birlikte gerekiyor:
-`extra_hosts` ile `freeswitch` adinin sabit IP'ye eslenmesi VE
-`use_dns_cache=0` (Kamailio kendi DNS onbellegini kullanirken `/etc/hosts`'u
-ATLAR — konteyner icinde `getent hosts freeswitch` dogru sonuc verirken
-Kamailio ayni adi cozemiyordu). `verify-94-startup-order.sh` bunu FreeSWITCH'i
-durdurup Kamailio'yu yeniden baslatarak sinar.
+**Kamailio may start before FreeSWITCH, and that is normal.** Kamailio has no
+`depends_on` for freeswitch (that would be a circular dependency). Because the
+dispatcher resolves its target at startup, this used to make every call fail
+with a permanent 503. Two measures are required together: an `extra_hosts`
+mapping of `freeswitch` to a fixed IP, **and** `use_dns_cache=0` (Kamailio skips
+`/etc/hosts` while its own DNS cache is enabled — inside the container
+`getent hosts freeswitch` resolved correctly while Kamailio could not).
+`verify-94-startup-order.sh` exercises this by stopping FreeSWITCH and
+restarting Kamailio.
 
-**Sema degisikliklerini `db/init/` scriptlerine yazin.** Bu scriptler yalnizca
-BOS bir veri dizininde calisir; calisan veritabanina elle `ALTER TABLE`
-uygulamak yeterli degildir. `verify-92-fresh-schema.sh` init scriptlerini
-gecici bir veritabaninda kosarak bunu dogrular.
+**Put schema changes in `db/init/`.** Those scripts only run against an *empty*
+data directory, so applying `ALTER TABLE` to the running database is not
+enough. `verify-92-fresh-schema.sh` proves the init scripts work by running
+them in a throwaway database.
 
-## Hata ayiklama
+## Debugging
 
 ```bash
-# SIP trafigi (FreeSWITCH)
+# SIP traffic (FreeSWITCH)
 docker compose exec freeswitch fs_cli -p "$FS_ESL_PASSWORD" -x "sofia global siptrace on"
 docker compose exec freeswitch tail -f /opt/freeswitch/var/log/freeswitch/freeswitch.log
 
-# canli kayitlar (DB DEGIL: usrloc db_mode=2 write-back, tablo gecikmeli)
+# live registrations (NOT the DB: usrloc db_mode=2 is write-back, the table lags)
 docker compose exec kamailio kamcmd ul.dump
 
-# dispatcher hedefleri
+# dispatcher targets
 docker compose exec kamailio kamcmd dispatcher.list
 
-# canli, ayristirilmis FreeSWITCH konfigurasyonu (dosya degil, GERCEK deger)
+# the live, parsed FreeSWITCH configuration (the REAL value, not the file)
 docker compose exec freeswitch fs_cli -p "$FS_ESL_PASSWORD" -x "xml_locate configuration configuration name sofia.conf"
 
-# CDR
+# CDRs
 docker compose exec postgres psql -U kamailio -d kamailio \
   -c "SELECT tenant_id,caller_id_number,destination_number,duration,billsec,hangup_cause FROM cdr ORDER BY id DESC LIMIT 10;"
 ```
 
-`sip-call-probe.py` ve `sip-uas-probe.py` (`tools/`) softphone olmadan gercek
-SIP cagrisi kurar; RTP echo'yu sayarak ses yolunu da dogrular.
+`tools/sip-call-probe.py` and `tools/sip-uas-probe.py` place real SIP calls
+without a softphone and verify the media path by counting RTP echo.
 
-## Bilinen sinirlar
+## Known limitations
 
-- **Yarim kalan SIP akislari:** ACK gonderilmeyen cagrilarda gecmiste SIGSEGV
-  gorulmustu; kok neden (`mod_cdr_pg_csv` semasi) giderildi ve
-  `verify-08` adim 9 regresyon olarak izliyor.
-- `trusted` ACL `172.16.0.0/12`'nin tamamina izin verir; ayni host'ta baska bir
-  Docker projesi FreeSWITCH'in internal profiline ulasabilir.
-- Event Socket (8021) yayinda; sunucuda guvenlik duvariyla kapatilmali.
-- Ses KALITESI (jitter, kopma) otomatik olcumu yok — kulakla dogrulanir.
-- Gelen trunk cagrisi, TLS/SRTP, voicemail, IVR kapsam disi.
+- **Half-finished SIP flows:** calls where the client never sends ACK used to
+  segfault FreeSWITCH. The root cause (the `mod_cdr_pg_csv` schema) is fixed and
+  `verify-08` step 9 guards against regressions.
+- The `trusted` ACL allows all of `172.16.0.0/12`, so another Docker project on
+  the same host could reach FreeSWITCH's internal profile.
+- Event Socket (8021) is published; firewall it on a real server.
+- Audio *quality* (jitter, dropouts) is not measured automatically — verify by
+  ear.
+- Inbound trunk calls, TLS/SRTP, voicemail and IVR are out of scope.
 
-## Dizin yapisi
+## Layout
 
 ```
-db/init/          sema + seed (yalnizca bos veri dizininde calisir)
-kamailio/         Dockerfile + kamailio.cfg (image'a gomulu)
-freeswitch/       Dockerfile, entrypoint.sh, conf/ (*.tmpl -> render), scripts/
+db/init/          schema + seed (only run against an empty data directory)
+kamailio/         Dockerfile + kamailio.cfg (baked into the image)
+freeswitch/       Dockerfile, entrypoint.sh, conf/ (*.tmpl -> rendered), scripts/
 xmlapi/           tenant-aware directory + dialplan (mod_xml_curl)
-scripts/          verify-*.sh dogrulama scriptleri
+scripts/          verify-*.sh verification scripts
 tools/            add-user.sh, sip-call-probe.py, sip-uas-probe.py
 ```
