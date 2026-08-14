@@ -15,7 +15,8 @@ RUN apt-get update && \
         kamailio \
         kamailio-postgres-modules \
         kamailio-extra-modules \
-        kamailio-tls-modules && \
+        kamailio-tls-modules \
+        kamailio-websocket-modules && \
     apt-get purge -y curl gnupg && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 
