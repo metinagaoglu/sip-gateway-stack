@@ -533,6 +533,8 @@ cat web/vendor/VERSION
 
 Sürüm ve sha256 kayda geçer; bağımlılığın hangi ikili olduğunu sonradan doğrulamanın tek yolu bu.
 
+**3.x major'ı zorunlu, tercih değil.** `client.js` hata olaylarında `e.cause` okuyor; bu jssip 3.x için doğru, ama başka bir major aynı alanı `event.data.cause` olarak veriyor ve o durumda bütün hata satırları `undefined` yazar — yani teşhis yüzeyi sessizce boşa çıkar. İndirilen sürümün 3.x olduğunu doğrula.
+
 - [ ] **Step 2: Kamailio NAT bloğuna WS dalını ekle**
 
 `kamailio.cfg` içindeki mevcut NAT bloğunu (`# NAT` yorumundan `nat_uac_test` bloğunun kapanışına kadar) şununla değiştir:
@@ -633,45 +635,62 @@ el('call').addEventListener('click', () => {
   const target = `sip:${el('target').value.trim()}@${el('domain').value.trim()}`;
   log(`ARIYOR ${target}`);
 
-  session = ua.call(target, {
-    // Mikrofon izni ICE icin ON KOSULDUR: izin verilmeden Chrome yerel
-    // IP'leri saklar ve host candidate yerine cozumlenemeyen bir .local mDNS
-    // adi yayinlar. FreeSWITCH o adi cozemez, connectivity check hic
-    // baslamaz ve belirti "cagri kuruluyor, ses yok" olur.
-    mediaConstraints: { audio: true, video: false },
-    // STUN gereksiz: sunucunun adresi zaten erisilebilir, baglantiyi tarayici
-    // baslatir ve FreeSWITCH symmetric RTP ile kaynaga geri gonderir. STUN
-    // yalnizca ICE toplama suresini uzatir.
-    pcConfig: { iceServers: [] },
-  });
+  // Dinleyiciler ua.call() CAGRILMADAN once verilir. JsSIP 3.x'te
+  // RTCSession.connect() icinde _createRTCConnection() SENKRON calisir ve
+  // 'peerconnection' olayini ua.call() DONMEDEN yayinlar; dinleyiciyi
+  // sonradan session.on(...) ile takmak onu KACIRIR. Belirti tam olarak bu
+  // projenin kacinmaya calistigi hatadir: cagri kurulur, srcObject hic
+  // atanmadigi icin ses yoktur, ve ICE logu da olmadigi icin sebep
+  // ayirt edilemez.
+  const eventHandlers = {
+    peerconnection: (e) => {
+      const pc = e.peerconnection;
+      pc.addEventListener('track', (ev) => {
+        log(`medya track alindi: ${ev.track.kind}`);
+        el('remote').srcObject = ev.streams[0];
+      });
+      pc.addEventListener('iceconnectionstatechange', () => {
+        log(`ICE durumu: ${pc.iceConnectionState}`);
+      });
+    },
+    // SDP logu tanida zorunlu: DTLS fingerprint'i, ICE candidate'lari ve
+    // medya profilinin (UDP/TLS/RTP/SAVPF) iki tarafta ne oldugunu baska
+    // yerden goremiyoruz.
+    sdp: (e) => log(`SDP ${e.originator} ${e.type}:\n${e.sdp}`),
+    progress: () => log('progress (180/183)'),
+    accepted: () => log('200 OK'),
+    confirmed: () => log('ACK gonderildi, cagri kuruldu'),
+    failed: (e) => {
+      log(`cagri basarisiz: ${e.cause}`);
+      resetCall();
+    },
+    ended: (e) => {
+      log(`cagri bitti: ${e.cause}`);
+      resetCall();
+    },
+  };
 
-  // SDP logu tanida zorunlu: DTLS fingerprint'i, ICE candidate'lari ve medya
-  // profilinin (UDP/TLS/RTP/SAVPF) iki tarafta ne oldugunu baska yerden
-  // goremiyoruz.
-  session.on('sdp', (e) => log(`SDP ${e.originator} ${e.type}:\n${e.sdp}`));
-
-  session.on('peerconnection', (e) => {
-    const pc = e.peerconnection;
-    pc.addEventListener('track', (ev) => {
-      log(`medya track alindi: ${ev.track.kind}`);
-      el('remote').srcObject = ev.streams[0];
+  // ua.call() SENKRON throw edebilir: bos/gecersiz hedef, guvensiz origin'de
+  // eksik RTCPeerConnection, baslatilmamis UA. Yakalanmazsa logda yalnizca
+  // "ARIYOR ..." kalir ve dugmeler yanlis durumda donar — index.html log
+  // alanini tek tani yuzeyi ilan ettigi icin bu kabul edilemez.
+  try {
+    session = ua.call(target, {
+      eventHandlers,
+      // Mikrofon izni ICE icin ON KOSULDUR: izin verilmeden Chrome yerel
+      // IP'leri saklar ve host candidate yerine cozumlenemeyen bir .local
+      // mDNS adi yayinlar. FreeSWITCH o adi cozemez, connectivity check hic
+      // baslamaz ve belirti "cagri kuruluyor, ses yok" olur.
+      mediaConstraints: { audio: true, video: false },
+      // STUN gereksiz: sunucunun adresi zaten erisilebilir, baglantiyi
+      // tarayici baslatir ve FreeSWITCH symmetric RTP ile kaynaga geri
+      // gonderir. STUN yalnizca ICE toplama suresini uzatir.
+      pcConfig: { iceServers: [] },
     });
-    pc.addEventListener('iceconnectionstatechange', () => {
-      log(`ICE durumu: ${pc.iceConnectionState}`);
-    });
-  });
-
-  session.on('progress', () => log('progress (180/183)'));
-  session.on('accepted', () => log('200 OK'));
-  session.on('confirmed', () => log('ACK gonderildi, cagri kuruldu'));
-  session.on('failed', (e) => {
-    log(`cagri basarisiz: ${e.cause}`);
-    resetCall();
-  });
-  session.on('ended', (e) => {
-    log(`cagri bitti: ${e.cause}`);
-    resetCall();
-  });
+  } catch (err) {
+    log(`cagri baslatilamadi: ${err && err.message ? err.message : err}`);
+    return;
+  }
 
   el('call').disabled = true;
   el('hangup').disabled = false;
