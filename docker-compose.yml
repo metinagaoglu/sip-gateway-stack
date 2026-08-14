@@ -140,8 +140,37 @@ services:
         # dolayisiyla baslatma sirasi hassasiyetini tamamen ortadan kaldirir.
         ipv4_address: ${FS_CONTAINER_IP}
 
+  web:
+    build: ./web
+    image: voip-web
+    container_name: voip-web
+    restart: unless-stopped
+    environment:
+      # entrypoint sertifikanin SAN'ini bunlardan uretir.
+      EXTERNAL_IP: ${EXTERNAL_IP}
+      SIP_DOMAIN: ${SIP_DOMAIN}
+    volumes:
+      # Sertifika KALICI olmali. Her yeniden kurulumda yeniden uretilirse
+      # tarayicidaki guvenlik istisnasi gecersizlesir ve kullanici onu elle
+      # yeniden kabul etmek zorunda kalir.
+      - voip_web_certs:/etc/nginx/certs
+    ports:
+      # TLS ucu BURADA. Kamailio'nun ws soketi (tcp/8080) host'a publish
+      # EDILMEZ; nginx ona voip_net uzerinden ulasir.
+      - "${WEB_TLS_PORT}:8443"
+    depends_on:
+      # nginx `proxy_pass http://kamailio:8080` adresini KONFIGURASYON
+      # YUKLENIRKEN cozer (degisken kullanilmadigi icin). Kamailio henuz
+      # yoksa nginx "host not found in upstream" ile cikar; restart politikasi
+      # onu yeniden baslatir ve ikinci denemede acilir. Bu, ayni sinif DNS
+      # sirasi sorununun (bkz. dispatcher/extra_hosts yorumlari) kabul
+      # edilebilir bicimidir: hata GURULTULU ve kendiliginden duzelir.
+      - kamailio
+    networks: [voip_net]
+
 volumes:
   voip_pg_data:
+  voip_web_certs:
 
 networks:
   voip_net:

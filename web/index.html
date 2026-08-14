@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebRTC test istemcisi</title>
+<style>
+  body   { font: 14px/1.5 system-ui, sans-serif; margin: 2rem; max-width: 46rem; }
+  label  { display: block; margin-top: .5rem; }
+  input  { width: 18rem; padding: .25rem; }
+  button { margin: 1rem .5rem 0 0; padding: .4rem .9rem; }
+  #log   { margin-top: 1rem; height: 24rem; overflow-y: auto; padding: .5rem;
+           background: #111; color: #0f0; white-space: pre-wrap;
+           font: 12px/1.4 ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<h1>WebRTC test istemcisi</h1>
+
+<label>Kullanıcı <input id="user" value="alice"></label>
+<label>Şifre <input id="pass" type="password" value="alice123"></label>
+<label>Domain <input id="domain" value="tenant1.voip.local"></label>
+<label>Aranan <input id="target" value="9999"></label>
+
+<button id="register">Register</button>
+<button id="call" disabled>Ara</button>
+<button id="hangup" disabled>Kapat</button>
+
+<audio id="remote" autoplay></audio>
+
+<!-- Log alani zorunlu: SDP'yi, ICE durumunu ve SIP cevaplarini gormenin
+     tek yolu bu. DTLS/ICE tanisi bu ciktiya dayaniyor. -->
+<div id="log"></div>
+
+<script src="vendor/jssip.min.js"></script>
+<script src="client.js"></script>
+</body>
+</html>
