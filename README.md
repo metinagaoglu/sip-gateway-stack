@@ -64,6 +64,10 @@ to `/etc/hosts` or set the outbound proxy to `<EXTERNAL_IP>:5060`.
 | `bob` / `alice` | user-to-user call |
 | 10–15 digits, `+E.164`, `00…` | SIP trunk (when enabled) |
 
+For a browser client instead of a softphone, see **Browser client (WebRTC)**
+below; it registers over WSS on a different port and needs no `/etc/hosts`
+entry.
+
 ## Adding users and tenants
 
 ```bash
@@ -76,6 +80,88 @@ The script computes `ha1` with the correct realm. If you insert rows by hand:
 Tenancy relies on `use_domain=1`: `alice@tenant1` and `alice@tenant2` are
 **different** users, and one tenant's password will not unlock the other's
 account. This behaviour is verified by `scripts/verify-91-tenant-isolation.sh`.
+
+## Browser client (WebRTC)
+
+A browser can register over SIP-over-WSS and call an extension or a
+UDP-registered softphone. nginx terminates TLS on `WEB_TLS_PORT`, serves the
+client page and proxies `/ws` to Kamailio's WebSocket socket, which stays
+inside the compose network and is never published. Media does not pass
+through nginx or Kamailio: it flows directly between the browser and
+FreeSWITCH as DTLS-SRTP, and FreeSWITCH transcodes OPUS to PCMU for the UDP
+leg.
+
+```bash
+docker compose up -d --build web
+open https://<EXTERNAL_IP>:8443/
+```
+
+The certificate is self-signed, so accept the browser warning once. It is
+generated at first start with `EXTERNAL_IP` in its subjectAltName and kept in
+a named volume, so the exception survives a rebuild. Page and WebSocket share
+one origin, so one exception covers both. If `EXTERNAL_IP` changes, the
+volume still holds the old certificate (the entrypoint never overwrites an
+existing one) and its subjectAltName no longer matches; delete the
+`voip_web_certs` volume so the next start reissues it.
+
+Get `EXTERNAL_IP` right before anything else — see the note in `.env.example`.
+A wrong value here does not fail loudly: FreeSWITCH advertises an unreachable
+media address, the DTLS handshake stalls at `HANDSHAKE` with silence in both
+directions, and signalling still looks completely healthy, which reads like a
+WebRTC bug rather than the configuration mismatch it actually is.
+
+| Field | Value |
+|---|---|
+| Username | `alice` |
+| Password | `alice123` |
+| Domain | `tenant1.voip.local` |
+
+**Grant the microphone permission, then reload the page.** Chrome only
+publishes real local ICE candidates if the microphone permission already
+exists *when the page's `RTCPeerConnection` is created*; granting it during
+the call itself is too late. If the browser hasn't held the permission since
+page load, its candidates are all mDNS `.local` names, FreeSWITCH cannot
+resolve them, and the call does not "connect with no audio" — it fails
+outright: FreeSWITCH answers `488`, the page log shows
+`cagri basarisiz: Incompatible SDP`, and the CDR shows
+`hangup_cause=INCOMPATIBLE_DESTINATION` with `duration=0`. Grant the
+permission once, reload the page, and the next call succeeds normally.
+
+**Only the browser-originated direction works.** Calling a browser client
+from a UDP softphone does not: signalling reaches FreeSWITCH as plain UDP
+SIP, so it offers `RTP/AVP` and the browser rejects media without DTLS. That
+direction needs SDP mangling and is not implemented — see
+`docs/superpowers/specs/2026-08-13-webrtc-wss-kamailio-design.md`.
+
+Verified end to end: a browser call to `9999` came back with echoed audio
+(CDR `duration=2`, `billsec=2`, `NORMAL_CLEARING`), and a browser call to a
+UDP-registered softphone carried two-way audio for its full length (CDR
+`duration=31`, `billsec=27`, `NORMAL_CLEARING`). FreeSWITCH negotiates the
+WebRTC offer arriving over plain UDP SIP with no configuration change at all:
+DTLS goes `OFF` → `HANDSHAKE` → `SETUP` → `READY`, it logs
+`audio Fingerprint Verified.` and
+`Secure Type: srtp:dtls:AES_CM_128_HMAC_SHA1_80`, and answers with
+`m=audio 16400 UDP/TLS/RTP/SAVPF 111 110`.
+
+**Candidate selection is rescued by symmetric RTP, not correct.** FreeSWITCH
+logs `NO candidate ACL defined, Defaulting to wan.auto` and, tested with two
+VPN tunnels active on the host, was observed advertising a virtual/VPN
+adapter address (`198.19.254.2`) instead of the real LAN address. The call
+still worked only because symmetric RTP re-latched onto the true source
+(`Auto Changing audio stun/rtp/dtls port from 198.19.254.2:51149 to
+172.30.0.1:25534`). Treat this as a caveat, not a guarantee — a host without
+that latching behaviour could fail on the same misdetection instead of
+recovering from it.
+
+**Known issue, not diagnosed: hanging up has been reported as not working**
+even on calls where audio was fine. Server-side evidence points away from a
+routing failure — the CDR shows `NORMAL_CLEARING` and there is no
+`loose_route` warning for the in-dialog BYE — so the likely cause is
+client-side UI state in `web/client.js`, not a signalling bug. No fix is
+applied yet.
+
+The published RTP range allows roughly six concurrent calls once both legs
+are counted; raise `RTP_END` before increasing concurrency.
 
 ## SIP trunk
 
