@@ -255,13 +255,24 @@ STUN eklemek yalnızca ICE toplama süresini uzatır. Production'da
 tamamen kapatmışsa medyayı TCP/443'e sokmak gerekir, STUN o durumda da
 kurtarmaz.
 
-**Mikrofon izni ICE için ön koşuldur.** Chrome, mikrofon izni verilmemişken
-yerel IP'leri saklar ve host candidate yerine `xxxxxxxx.local` biçiminde mDNS
-adı yayınlar. FreeSWITCH bu adı çözemez, ICE connectivity check hiç başlamaz.
-Uygulamanın `getUserMedia` çağırması bu yüzden sadece ses için değil, gerçek
-`192.168.1.x` host candidate'ının açılması için de gereklidir. Sıra önemli:
-izin alınmadan çağrı kurulmaya çalışılırsa belirti "çağrı kuruluyor, ses yok"
-olur ve sebebi SDP'de `.local` candidate'larından okunur.
+**Mikrofon izni ICE için ön koşuldur — ve izin çağrıdan ÖNCE verilmiş
+olmalıdır.** Chrome, izin yokken yerel IP'leri saklar ve host candidate yerine
+`xxxxxxxx.local` biçiminde mDNS adı yayınlar. FreeSWITCH bu adı çözemez.
+
+Bu bölümün ilk hali izni almanın yettiğini varsayıyordu; **ölçüm bunu
+yanlışladı.** Belirleyici olan iznin ne zaman verildiğidir: Chrome candidate'ı
+PeerConnection kurulurken üretir, dolayısıyla izin o andan önce mevcut
+değilse candidate `.local` doğar ve sonradan izin vermek onu geri almaz.
+İlk çağrıda izni istem sırasında vermek tam olarak bu duruma düşürdü.
+
+Belirti de sanıldığı gibi "çağrı kuruluyor, ses yok" değil: FreeSWITCH
+kullanılabilir hiçbir medya adresi göremediği için müzakereyi hiç yapmadan
+**488 Not Acceptable Here** döner. Tarayıcıda `cagri basarisiz: Incompatible
+SDP`, CDR'da `hangup_cause=INCOMPATIBLE_DESTINATION`, `duration=0` görünür.
+
+Pratik sonuç: ilk kullanımda izin verildikten sonra **sayfa yenilenmelidir**.
+README bu adımı açıkça yazmalıdır, çünkü aksi halde ilk deneme her zaman
+başarısız olur.
 
 `web/nginx.conf`:
 
@@ -301,11 +312,53 @@ Bu yüzden minimal istemcide gelen çağrı arayüzü de yoktur.
 
 ---
 
-## 7. Risk merdiveni
+## 7. Risk merdiveni — ölçüldü, hiçbir kademe gerekmedi
 
-Tek gerçek belirsizlik: FreeSWITCH, Kamailio'dan düz UDP SIP ile gelen WebRTC
-teklifini (DTLS fingerprint + ICE candidate + `UDP/TLS/RTP/SAVPF`) cevaplayacak
-mı. Cevaplamazsa sırayla:
+Tek gerçek belirsizlik şuydu: FreeSWITCH, Kamailio'dan düz UDP SIP ile gelen
+WebRTC teklifini (DTLS fingerprint + ICE candidate + `UDP/TLS/RTP/SAVPF`)
+cevaplayacak mı.
+
+**Sonuç: cevaplıyor, hiçbir yapılandırma değişikliği olmadan.** Log kanıtı:
+
+```
+Activate RTP/RTCP audio DTLS client
+Changing audio DTLS state from OFF to HANDSHAKE
+audio Fingerprint Verified.
+Changing audio DTLS state from SETUP to READY
+Secure Type: srtp:dtls:AES_CM_128_HMAC_SHA1_80
+```
+
+Cevap SDP'si `m=audio 16400 UDP/TLS/RTP/SAVPF 111 110`, FreeSWITCH'in kendi
+fingerprint'i ve bir host candidate'ı ile döndü. Aşağıdaki kademelerin
+**hiçbiri uygulanmadı**; `apply-candidate-acl` ve kanal değişkenleri config'e
+girmiyor.
+
+Faz 1 hedefi de doğrulandı: tarayıcıdan `9999` echo (CDR `duration=2`,
+`billsec=2`, `NORMAL_CLEARING`) ve UDP'de kayıtlı bir softphone ile çift yönlü
+konuşma (CDR `duration=31`, `billsec=27`, `NORMAL_CLEARING`).
+
+**Candidate seçimi yine de doğru çalışmıyor, yalnızca kurtarılıyor.**
+FreeSWITCH `NO candidate ACL defined, Defaulting to wan.auto` uyarısını veriyor
+ve gerçek LAN adresi yerine bir VPN adaptörü adresini (`198.19.254.2`) seçti.
+Çağrı symmetric RTP sayesinde ayakta kaldı:
+
+```
+Auto Changing audio stun/rtp/dtls port from 198.19.254.2:51149 to 172.30.0.1:25534
+```
+
+İki VPN tüneli açıkken bile çağrılar çalıştı, yani bu engelleyici değil ama
+latching olmayan bir ağda seçim çağrıyı düşürebilir. Kademe 1 o durumda
+gerçekten gerekli hale gelir; şu an ölçüm gerektirdiğini söylemediği için
+eklenmiyor.
+
+Ayrıca ölçümle öğrenilen bir işletme kuralı: `EXTERNAL_IP` makinenin gerçek LAN
+adresiyle uyuşmazsa FreeSWITCH ulaşılamaz bir medya adresi duyurur, DTLS
+`HANDSHAKE`'te takılır ve **iki yönde de ses olmaz** — sinyalizasyon sağlıklı
+görünmeye devam ettiği için hata WebRTC kusuru gibi okunur. `EXTERNAL_IP`
+değişince sertifika da yeniden üretilmelidir, çünkü SAN o adresi gömer;
+`voip_web_certs` volume'unu silmek entrypoint'i yeniden üretmeye zorlar.
+
+Merdiven, gerekli hale gelirse bu sırayla uygulanır:
 
 1. **`apply-candidate-acl`** — `internal.xml.tmpl` profilinde bu parametre hiç
    tanımlı değil, yani FreeSWITCH'in varsayılan candidate ACL'i geçerli.
@@ -359,5 +412,21 @@ yüzden otomatik test kalıcı olarak atlanmayacak, sadece sıraya alındı.
    `a=ice-ufrag`) `9999` çağrısı. FreeSWITCH cevabında `a=fingerprint` ve
    `a=setup:` aranır. Gerçek DTLS el sıkışması yapılmadan risk merdiveninin
    asıl sorusu böylece regresyon testine dönüşür.
-2. **Zoiper→tarayıcı yönü** — bölüm 6'daki SDP mangling problemi.
-3. **Trunk** — bu tasarımın dışında, mevcut `TRUNK_ENABLED` yolu üzerinden.
+2. **Kapatmanın tarayıcı arayüzünde yansımaması** — açık ve teşhis edilmemiş.
+   Ses çalışırken kullanıcı kapatmanın "olmadığını" bildirdi, ama sunucu tarafı
+   kusursuz görünüyor: `hangup_cause=NORMAL_CLEARING`, `duration=31`, ve dialog
+   içi hiçbir BYE için `loose_route` uyarısı yok. Aynı pencerede görülen
+   `loose_route basarisiz ... route=<null>` satırları **orijinal** hedef URI'sini
+   (`sip:9999@...`) taşıyor, yani 2xx dışı yanıtların ACK'lerine ait — o
+   ACK'lerde Route seti olmaması RFC 3261 gereğidir. Bu yüzden en olası yer
+   `web/client.js`'in olay işleyicileri, yönlendirme değil. Teşhis için tarayıcı
+   logunun `cagri bitti:` satırı ve hangi taraftan kapatıldığı gerekiyor.
+3. **Zoiper→tarayıcı yönü** — bölüm 6'daki SDP mangling problemi. Ölçülen
+   davranış, tahmin edilenden farklı: çağrı SDP uyuşmazlığına hiç gelmeden
+   `SERVICE_UNAVAILABLE` ve `duration=0` ile düştü. Sonraki fazın başlangıç
+   verisi bu.
+4. **`.env.example`'daki yanlış belirti açıklaması** — `EXTERNAL_IP` yorumu
+   uyuşmazlığın sonucunu "ses tek yönlü olur" diye anlatıyor; ölçülen sonuç iki
+   yönde de sessizlik ve DTLS'in `HANDSHAKE`'te takılması. Tek satırlık
+   düzeltme.
+5. **Trunk** — bu tasarımın dışında, mevcut `TRUNK_ENABLED` yolu üzerinden.
