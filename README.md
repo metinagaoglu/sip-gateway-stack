@@ -91,9 +91,15 @@ through nginx or Kamailio: it flows directly between the browser and
 FreeSWITCH as DTLS-SRTP, and FreeSWITCH transcodes OPUS to PCMU for the UDP
 leg.
 
+Get `EXTERNAL_IP` right before anything else — see the note in `.env.example`.
+A wrong value here does not fail loudly: FreeSWITCH advertises an unreachable
+media address, the DTLS handshake stalls at `HANDSHAKE` with silence in both
+directions, and signalling still looks completely healthy, which reads like a
+WebRTC bug rather than the configuration mismatch it actually is.
+
 ```bash
 docker compose up -d --build web
-open https://<EXTERNAL_IP>:8443/
+open https://<EXTERNAL_IP>:<WEB_TLS_PORT>/
 ```
 
 The certificate is self-signed, so accept the browser warning once. It is
@@ -104,17 +110,16 @@ volume still holds the old certificate (the entrypoint never overwrites an
 existing one) and its subjectAltName no longer matches; delete the
 `voip_web_certs` volume so the next start reissues it.
 
-Get `EXTERNAL_IP` right before anything else — see the note in `.env.example`.
-A wrong value here does not fail loudly: FreeSWITCH advertises an unreachable
-media address, the DTLS handshake stalls at `HANDSHAKE` with silence in both
-directions, and signalling still looks completely healthy, which reads like a
-WebRTC bug rather than the configuration mismatch it actually is.
-
 | Field | Value |
 |---|---|
 | Username | `alice` |
 | Password | `alice123` |
 | Domain | `tenant1.voip.local` |
+
+The page no longer prefills the password field, but keep `WEB_TLS_PORT`
+reachable only from a trusted LAN while these seeded credentials exist:
+anyone who reaches the port can still type `alice123` from this table, and
+once `TRUNK_ENABLED=true` that account can place outbound calls.
 
 **Grant the microphone permission, then reload the page.** Chrome only
 publishes real local ICE candidates if the microphone permission already

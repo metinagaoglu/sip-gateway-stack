@@ -163,8 +163,13 @@ event_route[xhttp:request] {
 }
 ```
 
-Eşleşmeyen istek sessizce düşmez, loglanır. Sessiz düşen handshake bu sınıf
-hatalarda en pahalı belirtidir: tarayıcı yalnız "connection closed" görür.
+Bu xlog yalnızca yukarıdaki dış kontrol (port, metod, Upgrade/Connection
+başlıkları) tutmadığında çalışır. `ws_handle_handshake()` kendisi reddederse
+(örneğin `Sec-WebSocket-Protocol: sip` eksik ya da yanlışsa) fonksiyon 0
+döner ve script `if(...)` içinde durur — aşağıdaki xlog o durumda hiç
+çalışmaz. Bu red, websocket modülünün kendi log satırında (`debug=2` ile)
+görünür, bu route'ta değil. Tarayıcı her iki durumda da yalnız "connection
+closed" görür.
 
 ### 4.4 Routing
 
@@ -206,13 +211,15 @@ mevcut UDP çağrıları etkilenmez.
 
 `loose_route()` dalında sıra önemlidir: önce mevcut `uri == myself` kontrolü
 (FreeSWITCH'in `ext-sip-ip` yüzünden bizi gösteren Contact'ı), sonra alias.
-Alias'lı RURI'nin host'u nginx container'ının IP'sidir, `myself` değildir,
-yani iki koşul çakışmaz.
+`set_contact_alias()` RURI'nin host kısmına dokunmaz; JsSIP'in kayıt
+sırasında ürettiği sahte `*.invalid` domaini host olarak kalır, yalnızca
+`;alias=ip~port~proto` parametresi eklenir. Bu host `myself`'e (SELF_IP)
+hiçbir zaman eşit olmadığı için iki koşul çakışmaz.
 
 ### 4.5 Bilinen kırılgan nokta: record_route yerleşimi
 
 `record_route()` şu anda hedef seçiminden **önce** çağrılıyor
-(`kamailio.cfg:187`). WS bacağı ile UDP bacağı arasında geçiş yapan çağrıda
+(`kamailio.cfg:232`). WS bacağı ile UDP bacağı arasında geçiş yapan çağrıda
 çift Record-Route gerekir ve Kamailio bunu çıkış soketini bildiği anda üretir.
 O noktada RURI (`sip:bob@tenant1.voip.local`) UDP'ye çözüldüğü için doğru
 çıkması muhtemel, ama garanti değil.
