@@ -428,10 +428,36 @@ yüzden otomatik test kalıcı olarak atlanmayacak, sadece sıraya alındı.
    ACK'lerde Route seti olmaması RFC 3261 gereğidir. Bu yüzden en olası yer
    `web/client.js`'in olay işleyicileri, yönlendirme değil. Teşhis için tarayıcı
    logunun `cagri bitti:` satırı ve hangi taraftan kapatıldığı gerekiyor.
-3. **Zoiper→tarayıcı yönü** — bölüm 6'daki SDP mangling problemi. Ölçülen
-   davranış, tahmin edilenden farklı: çağrı SDP uyuşmazlığına hiç gelmeden
-   `SERVICE_UNAVAILABLE` ve `duration=0` ile düştü. Sonraki fazın başlangıç
-   verisi bu.
+3. **Zoiper→tarayıcı yönü** — bu yön **iki** ayrı kusur taşıyor ve bölüm 6
+   yalnızca ikincisini anlatıyordu.
+
+   **Kusur A, sinyalizasyon (ölçüldü, kök sebep belli).** Çağrı SDP
+   uyuşmazlığına hiç gelmiyor; ondan önce Kamailio giden isteği WS
+   istemcisine gönderemiyor:
+
+   ```
+   WARNING: via_builder(): TCP/TLS connection (id: 0) for WebSocket could not
+            be found - likely it is gone (dst: [172.30.0.5]:48826)
+   ERROR: tm [t_fwd.c:1771]: t_forward_nonack(): failure to add branches
+   ```
+
+   `tm` branch ekleyemeyince otomatik 503 üretiyor; FreeSWITCH bunu
+   `SERVICE_UNAVAILABLE`'a çeviriyor ve arayan `500` görüyor (CDR:
+   `alice->bob`, `duration=0`, `SERVICE_UNAVAILABLE`, üç denemede aynı).
+   Sebep: `set_contact_alias()` hedefin `ip~port~proto` üçlüsünü saklıyor ama
+   **bağlantı kimliğini** saklamıyor. usrloc kaydında `Tcpconn-Id` mevcut
+   (`kamcmd ul.dump` ile görülüyor), fakat giden istek o kimlik üzerinden
+   değil hedef `ip:port` eşleşmesiyle gönderilmeye çalışılıyor ve gelen
+   bağlantı bulunamıyor. Bu, `tools/sip-call-probe.py` ile insan gerektirmeden
+   tekrar üretilebilir:
+   `--user alice --dest bob` (tarayıcı `bob` olarak kayıtlıyken).
+
+   **Kusur B, medya (öngörülen, henüz ölçülmedi).** A düzeltilse bile
+   FreeSWITCH bu bacağı WebRTC olarak işaretlemediği için düz `RTP/AVP`
+   teklif eder ve Chrome DTLS'siz medyayı reddeder — bölüm 6'daki SDP
+   mangling problemi.
+
+   Dolayısıyla bu yön tek bir düzeltmeyle açılmaz; sıra A, sonra B.
 4. **`.env.example`'daki yanlış belirti açıklaması** — `EXTERNAL_IP` yorumu
    uyuşmazlığın sonucunu "ses tek yönlü olur" diye anlatıyor; ölçülen sonuç iki
    yönde de sessizlik ve DTLS'in `HANDSHAKE`'te takılması. Tek satırlık
